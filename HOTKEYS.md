@@ -1,41 +1,46 @@
-# Seabunny keyboard shortcuts
+# keyboard shortcuts
 
-| Shortcut | Action |
+most of these are probably already in your muscle memory. here's the list anyway.
+
+| shortcut | what it does |
 | --- | --- |
-| F2 | Rename the single selected item |
-| Delete | Move selected items to Trash |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
-| Ctrl+Z | Undo a file operation |
-| Ctrl+Shift+Z / Ctrl+Y | Redo a file operation |
-| Ctrl+A | Select all items |
-| Ctrl+Shift+N | Create a folder |
-| Ctrl+F | Focus search and select its text |
-| Ctrl+L | Edit the location |
-| F5 / Ctrl+R | Refresh the folder |
-| Ctrl+H | Toggle hidden files |
-| Alt+Enter | Show properties for the selected item, or the current folder with no selection |
-| Alt+Left / Alt+Right | Back / forward |
-| Alt+Up | Open the parent folder |
-| Alt+Home | Open Home |
-| Backspace | Back when navigating files |
-| Ctrl+1 / Ctrl+2 | Grid / list view |
-| F9 | Expand / collapse the sidebar |
-| Arrow keys / Shift+arrows | Navigate / extend selection |
-| Enter | Open the selected item |
-| Ctrl+T / Ctrl+W | Open / close a tab |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
+| F2 | rename the one selected item |
+| Delete | move selected items to trash |
+| Ctrl+C / Ctrl+X / Ctrl+V | copy / cut / paste |
+| Ctrl+Z | undo a file operation |
+| Ctrl+Shift+Z / Ctrl+Y | redo a file operation |
+| Ctrl+A | select everything in the current view |
+| Ctrl+Shift+N | make a folder |
+| Ctrl+F | focus search and select its text |
+| Ctrl+L | edit the location |
+| F5 / Ctrl+R | refresh the folder |
+| Ctrl+H | show or hide hidden files |
+| Alt+Enter | properties for the selected item, or the current folder if nothing is selected |
+| Alt+Left / Alt+Right | back / forward |
+| Alt+Up | open the parent folder |
+| Alt+Home | go home |
+| Backspace | go back while browsing files |
+| Ctrl+1 / Ctrl+2 | grid / list view |
+| F9 | expand / collapse the sidebar |
+| Arrow keys / Shift+arrows | move through files / extend the selection |
+| Enter | open the selected item |
+| Ctrl+T / Ctrl+W | open / close a tab |
+| Ctrl+Tab / Ctrl+Shift+Tab | next / previous tab |
 
-File-operation shortcuts yield to focused text fields and modal dialogs. Delete in
-a filename or search field edits text. File Undo/Redo does not intercept text Undo.
-Rename selects a file's basename while leaving its extension visible; directory
-names are selected in full. Rename from recursive search uses the actual parent
-directory of the selected result.
+if you're typing in a filename or search box, the keys stay with that box. delete
+edits the text, and undo edits the text too. file actions also wait while a dialog
+is open.
 
-Chooser windows support browsing shortcuts, but block file-operation shortcuts
-such as rename, Trash, paste and filesystem Undo. Enter and Escape retain chooser
-accept/cancel behavior. Archive browsing retains its read-only restrictions.
-Delete is reversible through Trash and Undo; permanent deletion is not bound.
+rename selects the filename without its extension, so you can just type a new name
+without losing `.txt` or whatever was there. folders get their whole name selected.
+renaming a search result changes the file in its actual folder.
 
-The reference for the familiar bindings is GNOME Files/Nautilus:
+the file picker keeps the browsing shortcuts, but blocks things like rename,
+trash, paste, and file undo. enter accepts or opens things as appropriate, and
+escape cancels. archives stay read-only.
+
+delete goes through trash and can be undone. there's no permanent-delete shortcut.
+
+the familiar bindings take their cue from GNOME Files/Nautilus:
 [view actions and key bindings](https://github.com/GNOME/nautilus/blob/main/src/nautilus-files-view.c).
-Seabunny implements these actions through its existing Qt/QML components.
+the actual actions use seabunny's own qt/qml components.
