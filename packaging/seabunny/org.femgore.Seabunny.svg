@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1248 1248" role="img" aria-labelledby="title desc">
+  <title id="title">Sea bunny</title>
+  <desc id="desc">Minimal rounded sea bunny facing left, with two ears, one eye, and a flat bottom.</desc>
+  <rect width="1248" height="1248" rx="250" ry="250" fill="#1e1e2e"/>
+  <g fill="none" stroke="#cccccc" stroke-width="60" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Domed body, with a straight bottom and no tail. -->
+    <path d="M 365 587 C 283 642 249 708 249 780 C 249 871 294 936 368 936 H 869 C 937 936 960 873 960 788 C 960 648 849 520 644 520"/>
+    <!-- Rear ear. -->
+    <path d="M 369 588 C 329 520 315 432 341 364 C 360 312 401 310 435 346 C 495 410 479 491 470 578"/>
+    <!-- Front ear. -->
+    <path d="M 470 578 C 465 475 521 359 580 333 C 615 317 645 331 656 368 C 672 428 616 538 568 584"/>
+  </g>
+  <circle cx="370" cy="741" r="39" fill="#cccccc"/>
+</svg>

@@ -1,0 +1,49 @@
+# Build products and editor state
+/target/
+/result
+/.direnv/
+/.idea/
+/.vscode/
+/.qmlls.ini
+__pycache__/
+*.py[cod]
+*.log
+*.bak
+*.tmp
+
+# Local development instructions and work notes
+/AGENTS.md
+/PROJECT.md
+/PERFORMANCE.md
+/SERPANTINUM.md
+/PORTAL-IMPLEMENTATION.md
+/.agents/
+/.codex/
+/.claude/
+/.opencode/
+/.planning/
+
+# Personal configuration and credentials never belong in source releases
+.env
+.env.*
+*.pem
+*.key
+/.ssh/
+/.aws/
+/.config/
+
+# Local screenshot fixtures and unused source images
+/Screenshot Samples/
+/example.jpeg
+/image1.png
+/image2.png
+/image3.png
+/image4.png
+/img*.png
+
+# Generated package output
+/packaging/bin/
+/packaging/dist/
+/packaging/arch/build/
+/packaging/deb/build/
+/packaging/tarball/

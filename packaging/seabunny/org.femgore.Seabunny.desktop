@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Seabunny
+GenericName=File Manager
+Comment=An expressive file manager with live desktop colors and archive browsing
+Exec=seabunny %U
+TryExec=seabunny
+Icon=org.femgore.Seabunny
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;application/zip;application/x-7z-compressed;application/vnd.rar;application/x-rar;application/x-tar;application/gzip;application/x-xz;application/zstd;
+Keywords=files;folders;explorer;browser;archive;seabunny;
+StartupNotify=true
+StartupWMClass=org.femgore.Seabunny

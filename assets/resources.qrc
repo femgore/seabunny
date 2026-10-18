@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/seabunny">
+    <file alias="branding/seabunny.svg">branding/seabunny.svg</file>
+    <file alias="branding/seabunny_logo.svg">branding/seabunny_logo.svg</file>
+    <file alias="fonts/SymbolsNerdFontMono-Regular.ttf">fonts/SymbolsNerdFontMono-Regular.ttf</file>
+    <file alias="fonts/Phosphor.ttf">fonts/Phosphor.ttf</file>
+    <file alias="fonts/Phosphor-Bold.ttf">fonts/Phosphor-Bold.ttf</file>
+    <file alias="fonts/Phosphor-Fill.ttf">fonts/Phosphor-Fill.ttf</file>
+    <file alias="fonts/Phosphor-Duotone.ttf">fonts/Phosphor-Duotone.ttf</file>
+    <file alias="fonts/Phosphor-Light.ttf">fonts/Phosphor-Light.ttf</file>
+    <file alias="fonts/Phosphor-Thin.ttf">fonts/Phosphor-Thin.ttf</file>
+  </qresource>
+</RCC>
