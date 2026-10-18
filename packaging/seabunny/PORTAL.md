@@ -1,4 +1,7 @@
-# the seabunny file picker
+# naturally, there's a file picker
+
+i made the file manager match my desktop and then the save dialog looked out of
+place. so now there's this whole thing. excellent use of an afternoon.
 
 the picker is optional. it lets apps use seabunny for open, save, and folder
 dialogs through the desktop portal. you can use it just for FileChooser and leave
@@ -8,15 +11,17 @@ it's a separate `xdg-desktop-portal-seabunny` process. each request gets its own
 window, selection, and navigation. closing one cancels that request; it doesn't
 close another picker or your file-manager window. the backend stays around for
 later requests, allows up to 32 pending requests, and exits if its session bus
-disconnects.
+disconnects. closing a save dialog shouldn't take your file manager down with it.
+that would be a spectacularly stupid party trick.
 
-## what works
+## what the thing actually does
 
 the picker uses the same browser, sidebar, icons, thumbnails, navigation,
 animations, and live colors as the file manager. it supports single or multiple
 files, folder selection, filters, suggested filenames, and overwrite confirmation.
 file changes, archive opening, external file launching, and the settings view are
 disabled here. it doesn't restore explorer tabs or save general appearance settings.
+it's here to pick a file. it doesn't need to start rearranging your shit.
 
 the explorer and picker remember their sidebar size and open/closed state
 separately in `$XDG_STATE_HOME/seabunny/{explorer,chooser}-sidebar.json`, normally
@@ -33,7 +38,8 @@ suggested extension, but keeps an extension you've entered yourself.
 `SaveFiles` picks a folder for several output files and returns numbered names
 where there are collisions, in the original order. the picker doesn't create,
 truncate, reserve, or download files. the calling app does the actual writing and
-still has to handle anything that changes after the dialog closes.
+still has to handle anything that changes after the dialog closes. the picker
+can't reserve a filename through sheer confidence.
 
 local paths come back as absolute, percent-encoded `file://` urls. remote paths,
 archive members, and other virtual locations aren't supported. filenames with
@@ -41,12 +47,12 @@ invalid UTF-8 bytes can't round-trip through qt, so they aren't returned with
 replacement characters. MIME filters use filename classification rather than
 reading each file's contents.
 
-## build and check it first
+## build it before making it everyone's problem
 
 you need rust/cargo, qt 6 Quick/QML and D-Bus development files, KF6WindowSystem,
 pkg-config, cmake, and python. the private-bus test uses system python's PyGObject;
 the optional Helium test also needs `websockets`. the installers don't download
-dependencies for you.
+dependencies for you. check the list; there's always one damn library.
 
 from the checkout, in fish:
 
@@ -71,7 +77,8 @@ desktop session.
 the Helium test uses a temporary profile, headless Ozone, ctrl+s, and a sample
 download prompt. it checks that `SaveFile` reaches seabunny with the suggested
 filename. it keeps Chromium's sandbox enabled. this doesn't test actual Niri
-window behavior or prove that a browser download finishes writing.
+window behavior or prove that a browser download finishes writing. headless tests
+are useful, but they don't have a secret pair of eyes on your desktop.
 
 ## make a package
 
@@ -83,7 +90,7 @@ python3 -B packaging/seabunny/package_user.py build --with-portal
 `portal_user.py`. a normal package build leaves those out. the portal has its own
 versioned installation, separate from the file manager.
 
-## register it, then try it
+## register it and see if it opens a fucking window
 
 use the package directory printed by the build command:
 
@@ -98,7 +105,7 @@ only advertises FileChooser, and existing backends stay installed. you'll need a
 XDG Desktop Portal version that discovers user-local descriptors.
 
 keep the printed **install receipt path**. that's what you'll use to undo the
-registration later.
+registration later. save the path somewhere you can actually find it.
 
 if you get `The name is not activatable`, the session bus may need to rescan its
 activation files. try this, then check the backend again:
@@ -110,7 +117,8 @@ gdbus introspect --session --dest org.freedesktop.impl.portal.desktop.seabunny -
 
 that rescan doesn't restart D-Bus or the portal frontend. if a private-test log
 mentions RealtimeKit with the same error, check the service name: a RealtimeKit
-warning isn't a seabunny activation failure.
+warning isn't a seabunny activation failure. several services can complain in
+the same log. very generous of them.
 
 there's a live test that opens five dialogs using sample files, without changing
 portal routing:
@@ -127,7 +135,8 @@ sample files stay under `target/portal-live-test-*`.
 
 the manual test doesn't add an encoding menu. extra choices in a real dialog come
 from the app that opened it. seabunny returns the choice; it doesn't convert file
-encoding.
+encoding. an extra checkbox isn't a promise that seabunny secretly became a
+text editor.
 
 if you want to call the backend directly, this also opens a dialog without
 changing routing:
@@ -141,14 +150,15 @@ selecting files and folders, spaces and Unicode in paths, filters, and overwrite
 confirmation. use sample files for this. the private-bus integration test also
 checks a portal-aware client before you change the live desktop's routing.
 
-## enable it for FileChooser on niri
+## give it the FileChooser job on niri
 
 first find the portal config your session is actually using. desktop-specific
 files take precedence within each search location. the helper asks for that file
 explicitly so it can preserve your other preferences.
 
 portal config files are selected, not merged across locations. don't replace your
-existing config with a single FileChooser line.
+existing config with a single FileChooser line. that's a great way to turn a
+file-picker experiment into a screen-sharing troubleshooting session.
 
 ```fish
 python3 -B packaging/seabunny/portal_user.py enable --base-config /absolute/path/to/effective/portals.conf
@@ -166,7 +176,7 @@ org.freedesktop.impl.portal.FileChooser=seabunny
 it writes the niri-specific user config and keeps the original bytes in a receipt.
 keep the printed **enable receipt path** too. ScreenCast, Screenshot,
 RemoteDesktop, and unrelated entries keep the preferences from your base config.
-your Niri and Quickshell configs aren't edited.
+your Niri and Quickshell configs aren't edited. the scope is one damn chooser.
 
 the running portal frontend needs to reread its config. wait until screen sharing
 and other portal operations have stopped, then run:
@@ -175,7 +185,7 @@ and other portal operations have stopped, then run:
 systemctl --user restart xdg-desktop-portal.service
 ```
 
-the scripts don't run that for you. restarting the frontend can interrupt active
+the scripts don't run that for you. surprise service restarts are bullshit. restarting the frontend can interrupt active
 portal operations. you don't need to reload the compositor.
 
 now try Helium's ctrl+s on a sample local page, and its upload button for OpenFile.
@@ -194,7 +204,7 @@ this goes through `org.freedesktop.portal.FileChooser` and its public request an
 response handling, rather than calling the backend directly. if dialogs stop
 opening, use the rollback below.
 
-## go back or uninstall
+## put it back if it acts up
 
 to restore your previous routing, use the **enable receipt**, then restart the
 frontend when it's safe to interrupt portal operations:
@@ -213,13 +223,14 @@ python3 -B packaging/seabunny/portal_user.py uninstall --receipt /absolute/insta
 rollback checks file hashes and won't overwrite edits made after installation.
 it moves the installed registration files into the receipt directory and restores
 the old bytes and permissions, or leaves a previously absent file absent. payloads
-and backups stay around; nothing is recursively deleted.
+and backups stay around; nothing is recursively deleted. rollback shouldn't
+need its own recovery mission.
 
 if you've installed or enabled it more than once, undo the receipts in reverse
 order. removing registration doesn't stop an already-running backend, so it can
 stay idle until the session ends.
 
-## if something isn't working
+## when the computer has other plans
 
 - check activation and method signatures with `gdbus introspect --session --dest org.freedesktop.impl.portal.desktop.seabunny --object-path /org/freedesktop/portal/desktop`.
 - if activation fails, check the generated service's absolute Exec path and make
@@ -236,7 +247,7 @@ stay idle until the session ends.
   compositor support for XDG Foreign before changing desktop rules. live colors
   use seabunny's palette watcher and don't rewrite your theme.
 
-## the D-Bus bits
+## the D-Bus shit, if you're here for that
 
 if you need the interface details, the backend owns
 `org.freedesktop.impl.portal.desktop.seabunny` and exports FileChooser at
@@ -254,6 +265,11 @@ a real desktop check; offscreen tests can't establish those.
 
 colors use an environment override or the standard Serpantinum state path, with
 the built-in theme as fallback.
+
+if something still goes sideways, open an issue with your desktop, portal
+versions, the command you tried, and a relevant error. check logs for private
+filenames before sharing them. suggestions and clearer ways to explain this mess
+are welcome too.
 
 the official references, if you need to dig further:
 [FileChooser backend](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.impl.portal.FileChooser.html),
