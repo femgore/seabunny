@@ -61,9 +61,34 @@ previews use seabunny's own cache paths.
 
 ## the colors and the other window
 
-live Serpantinum colors use `SEABUNNY_SERPANTINUM_COLORS`, `QS_COLORS_JSON`, or
-`$XDG_STATE_HOME/serpantinum/qs_colors.json`. if there's no palette, the built-in
-colors take over. none of this rewrites your compositor or theme config.
+select Serpantinum in the accent settings to follow its live colors. the explorer
+and picker look in this order:
+
+1. `SEABUNNY_SERPANTINUM_COLORS`
+2. `QS_COLORS_JSON`
+3. `$QS_STATE_DIR/qs_colors.json`
+4. `$XDG_STATE_HOME/seabunny/serpantinum-colors.json`
+5. `$XDG_STATE_HOME/serpantinum/qs_colors.json`
+
+`XDG_STATE_HOME` defaults to `~/.local/state`. if your shell keeps its palette
+somewhere custom, a link at option 4 lets both windows find it without relying on
+whatever environment the launcher happened to inherit. replace the example path
+with your actual generated palette:
+
+```fish
+set -l state "$HOME/.local/state"
+if set -q XDG_STATE_HOME; and test -n "$XDG_STATE_HOME"
+    set state "$XDG_STATE_HOME"
+end
+mkdir -p "$state/seabunny"
+ln -s /path/to/your/session/state/qs_colors.json "$state/seabunny/serpantinum-colors.json"
+```
+
+restart seabunny and the idle picker backend after adding the link. palette updates
+then apply live, including the atomic file replacements that used to be a pain in
+the ass. an explicit environment path wins even if it's missing. bad updates keep
+the last good colors; without any valid palette, the built-in colors take over.
+none of this rewrites your compositor or theme config.
 
 including the portal in a package, registering it, and enabling it are separate
 steps. [the picker guide](PORTAL.md) walks through those and how to go back.

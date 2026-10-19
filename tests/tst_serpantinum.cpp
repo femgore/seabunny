@@ -150,6 +150,7 @@ private slots:
         path = temporary.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + ".json");
         qputenv("SEABUNNY_SERPANTINUM_COLORS", path.toUtf8());
         qunsetenv("QS_COLORS_JSON");
+        qunsetenv("QS_STATE_DIR");
     }
 
     void initialLoad() {
@@ -413,6 +414,103 @@ private slots:
         SerpantinumPalette source;
         if (previous.isNull()) qunsetenv("XDG_STATE_HOME"); else qputenv("XDG_STATE_HOME", previous);
         QCOMPARE(source.colors(), palette().toVariantMap());
+    }
+
+    void nativeStateDirectoryDiscovery() {
+        QTemporaryDir state;
+        QVERIFY(state.isValid());
+        qunsetenv("SEABUNNY_SERPANTINUM_COLORS");
+        qputenv("QS_STATE_DIR", state.path().toUtf8());
+        publish(state.filePath("qs_colors.json"), QJsonDocument(palette()).toJson());
+        SerpantinumPalette source;
+        QCOMPARE(source.sourcePath(), state.filePath("qs_colors.json"));
+        QCOMPARE(source.colors(), palette().toVariantMap());
+    }
+
+    void linkedPaletteDiscoveryAndUpdates() {
+        QTemporaryDir state;
+        QTemporaryDir producer;
+        QVERIFY(state.isValid() && producer.isValid());
+        const QByteArray previous = qgetenv("XDG_STATE_HOME");
+        const auto restore = qScopeGuard([&] {
+            if (previous.isNull()) qunsetenv("XDG_STATE_HOME"); else qputenv("XDG_STATE_HOME", previous);
+        });
+        qunsetenv("SEABUNNY_SERPANTINUM_COLORS");
+        qputenv("XDG_STATE_HOME", state.path().toUtf8());
+        QVERIFY(QDir().mkpath(state.filePath("seabunny")));
+        const QString target = producer.filePath("palette ö.json");
+        const QString link = state.filePath("seabunny/serpantinum-colors.json");
+        publish(target, QJsonDocument(palette()).toJson());
+        QVERIFY(QFile::link(target, link));
+        SerpantinumPalette source;
+        QCOMPARE(source.sourcePath(), link);
+        QCOMPARE(source.colors(), palette().toVariantMap());
+        for (int index = 1; index <= 3; ++index) {
+            auto next = palette();
+            next["blue"] = QString("#00000%1").arg(index);
+            publish(target, QJsonDocument(next).toJson());
+            QTRY_COMPARE(source.colors(), next.toVariantMap());
+        }
+        QVERIFY(QFile::remove(target));
+        QTRY_VERIFY(source.status().startsWith("Palette unavailable"));
+        publish(target, QJsonDocument(palette(true)).toJson());
+        QTRY_COMPARE(source.colors(), palette(true).toVariantMap());
+
+        QTemporaryDir replacement;
+        QVERIFY(replacement.isValid());
+        const QString nextTarget = replacement.filePath("next colors.json");
+        publish(nextTarget, QJsonDocument(palette()).toJson());
+        QVERIFY(QFile::remove(link));
+        QVERIFY(QFile::link(nextTarget, link));
+        QTRY_COMPARE(source.colors(), palette().toVariantMap());
+        publish(nextTarget, QJsonDocument(palette(true)).toJson());
+        QTRY_COMPARE(source.colors(), palette(true).toVariantMap());
+    }
+
+    void missingLinkedPaletteRecovers() {
+        QTemporaryDir state;
+        QTemporaryDir producer;
+        QVERIFY(state.isValid() && producer.isValid());
+        const QByteArray previous = qgetenv("XDG_STATE_HOME");
+        const auto restore = qScopeGuard([&] {
+            if (previous.isNull()) qunsetenv("XDG_STATE_HOME"); else qputenv("XDG_STATE_HOME", previous);
+        });
+        qunsetenv("SEABUNNY_SERPANTINUM_COLORS");
+        qputenv("XDG_STATE_HOME", state.path().toUtf8());
+        QVERIFY(QDir().mkpath(state.filePath("seabunny")));
+        const QString target = producer.filePath("colors.json");
+        const QString link = state.filePath("seabunny/serpantinum-colors.json");
+        publish(target, QJsonDocument(palette()).toJson());
+        QVERIFY(QFile::link(target, link));
+        QVERIFY(QFile::remove(target));
+        SerpantinumPalette source;
+        QCOMPARE(source.sourcePath(), link);
+        QVERIFY(!source.available());
+        publish(target, QJsonDocument(palette()).toJson());
+        QTRY_COMPARE(source.colors(), palette().toVariantMap());
+    }
+
+    void linkedPalettePriorityAndExplicitOverride() {
+        QTemporaryDir state;
+        QVERIFY(state.isValid());
+        const QByteArray previous = qgetenv("XDG_STATE_HOME");
+        const auto restore = qScopeGuard([&] {
+            if (previous.isNull()) qunsetenv("XDG_STATE_HOME"); else qputenv("XDG_STATE_HOME", previous);
+        });
+        qputenv("XDG_STATE_HOME", state.path().toUtf8());
+        QVERIFY(QDir().mkpath(state.filePath("seabunny")));
+        QVERIFY(QDir().mkpath(state.filePath("serpantinum")));
+        const QString target = state.filePath("custom.json");
+        publish(target, QJsonDocument(palette(true)).toJson());
+        publish(state.filePath("serpantinum/qs_colors.json"), QJsonDocument(palette()).toJson());
+        QVERIFY(QFile::link(target, state.filePath("seabunny/serpantinum-colors.json")));
+        qunsetenv("SEABUNNY_SERPANTINUM_COLORS");
+        SerpantinumPalette linked;
+        QCOMPARE(linked.colors(), palette(true).toVariantMap());
+        qputenv("SEABUNNY_SERPANTINUM_COLORS", path.toUtf8());
+        SerpantinumPalette explicitSource;
+        QVERIFY(!explicitSource.available());
+        QCOMPARE(explicitSource.sourcePath(), path);
     }
 
     void inPlaceWritesRecoverAfterPartialOutput() {
