@@ -2,7 +2,7 @@
 
 a file manager. for managing files. groundbreaking stuff.
 
-i wanted my folders to look nice and somehow that became a whole damn rust + qt/qml project.
+i wanted my folders to look nice and stuff so that became a rust + qt/qml project.
 there are tabs. there are thumbnails. the sidebar remembers where i left it.
 i've spent an unreasonable amount of time looking at little rectangles.
 
@@ -13,7 +13,7 @@ keep that in mind if you're bringing it somewhere else.
 
 ## look at her
 
-four screenshots of a file manager. this is what having hobbies looks like now.
+yeah theres 4 of them. i really wanted you to see that it changes colors.
 yes, the spacing is deliberate. i have been incredibly annoying about it.
 
 | dark | light |
