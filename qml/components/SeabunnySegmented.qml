@@ -99,7 +99,8 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                root.value = modelData.value;
+                                // The caller owns value. Assigning here would break
+                                // its binding when the active folder or tab changes.
                                 root.selected(modelData.value);
                             }
                         }

@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -37,3 +38,37 @@ with tempfile.TemporaryDirectory(prefix="seabunny-folder-sort-") as tmp:
         else:
             assert saved == {"version": 1, "folders": {}}
     print("PASS only non-default folders occupy state; resetting removes the entry")
+
+    # Exercise real menu clicks too: assigning to a control's bound value can
+    # detach its indicator from the backend even when storage itself is correct.
+    for folder in ("Sort A", "Sort B"):
+        directory = fixture / "home" / folder
+        (directory / "middle folder").mkdir(parents=True)
+        for name in ("alpha.txt", "zulu.txt"):
+            (directory / name).write_text("synthetic sort UI fixture")
+    shutil.copytree(root / "qml", fixture / "qml")
+    main = fixture / "qml/main.qml"
+    source = main.read_text().replace("    id: window\n", "    id: window\n"
+        "    property alias benchmarkOrder: testSortOrder\n"
+        "    property alias benchmarkFolders: testFolderPosition\n"
+        "    property alias benchmarkMenu: viewMenuPopup\n"
+        "    property alias benchmarkTabs: folderTabs\n"
+        "    property alias benchmarkTheme: theme\n", 1)
+    source = source.replace('            value: engine.sort_ascending ? "asc" : "desc"',
+        '            id: testSortOrder\n            value: engine.sort_ascending ? "asc" : "desc"')
+    source = source.replace('            value: engine.folder_position',
+        '            id: testFolderPosition\n            value: engine.folder_position')
+    main.write_text(source)
+    env["SEABUNNY_QML"] = str(root / "tests/FolderSortUiChecks.qml")
+    for stage in ("seed", "read", "reset"):
+        config.write_text(json.dumps({"sort_ui_stage": stage, "ui_source": str(main)}))
+        result = subprocess.run([str(root / "target/release/seabunny")], env=env,
+            text=True, capture_output=True, timeout=35)
+        output = result.stdout + result.stderr
+        print(output)
+        assert result.returncode == 0 and "FOLDER_SORT_UI_PASSED" in output
+        assert not any(error in output for error in ("FOLDER_SORT_UI_FAILED", "ReferenceError", "TypeError", "Unable to assign", "Binding loop"))
+        expected = {} if stage == "reset" else {
+            str(fixture / "home/Sort A"): {"field": "name", "ascending": False, "folders": "first"}}
+        assert json.loads(state.read_text()) == {"version": 1, "folders": expected}
+    print("PASS real sort-menu state, rendered ordering and sparse persistence across navigation and relaunch")
