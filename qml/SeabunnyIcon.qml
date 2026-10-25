@@ -154,7 +154,8 @@ Item {
         "clock": "\uf017", "calendar-blank": "\uf073", "user": "\uf007", "users": "\uf0c0",
         "sidebar": "\uf0db", "sidebar-simple": "\uf0db", "sliders-horizontal": "\uf1de",
         "eject": "\uf052", "usb": "\uf287", "github-logo": "\uf09b", "camera": "\uf030",
-        "sun": "\uf185", "moon": "\uf186", "shield-check": "\uf132", "cloud": "\uf0c2"
+        "sun": "\uf185", "moon": "\uf186", "shield-check": "\uf132", "cloud": "\uf0c2",
+        "package": "\uf187"
     })
     readonly property bool usesSymbols: typeof theme !== "undefined" && theme.iconSource === "serpantinum" && !!symbolsMap[name]
     readonly property string primaryGlyph: usesSymbols ? symbolsMap[name] : (glyphMap[name] || "\ue230")

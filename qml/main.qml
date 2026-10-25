@@ -4841,10 +4841,75 @@ ApplicationWindow {
         dialogWidth: 380
 
         property var info: ({})
+        property int permissionMode: 0
+        property string permissionError: ""
+        readonly property bool permissionsEditable: !window.chooserMode && !!info.can_edit_permissions
+        readonly property bool permissionsChanged: permissionMode !== ((info.permission_mode || 0) & 0o777)
 
         function showInfo(path) {
             info = JSON.parse(engine.get_item_info(path) || "{}");
+            permissionMode = (info.permission_mode || 0) & 0o777;
+            permissionError = "";
             open();
+        }
+
+        function setAccess(shift, access) {
+            if (!permissionsEditable) return;
+            var mask = (info.is_dir ? 7 : 6) << shift;
+            permissionMode = (permissionMode & ~mask) | (access << shift);
+            permissionError = "";
+        }
+
+        function setExecutable(checked) {
+            if (!permissionsEditable || !info.is_regular) return;
+            permissionMode = checked ? permissionMode | 0o100 | ((permissionMode & 0o444) >> 2)
+                                     : permissionMode & ~0o111;
+            permissionError = "";
+        }
+
+        function savePermissions() {
+            if (!permissionsEditable || !permissionsChanged) return;
+            var result = JSON.parse(engine.set_item_permissions(info.path, info.permission_identity,
+                info.permission_mode, permissionMode) || "{}");
+            if (result.error) { permissionError = result.error; return; }
+            info = result;
+            close();
+        }
+
+        component PermissionRow: RowLayout {
+            property string label: ""
+            property int shift: 0
+            id: permissionRow
+            Layout.fillWidth: true
+            spacing: 12
+            Text {
+                text: permissionRow.label
+                color: theme.textMain
+                font.pixelSize: 12
+                Layout.preferredWidth: 80
+            }
+            ChooserComboBox {
+                objectName: "permissionAccess" + permissionRow.shift
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
+                enabled: propsModal.permissionsEditable
+                opacity: enabled ? 1 : 0.5
+                Accessible.name: permissionRow.label + " access"
+                readonly property int access: (propsModal.permissionMode >> permissionRow.shift) & (propsModal.info.is_dir ? 7 : 6)
+                model: {
+                    var options = propsModal.info.is_dir
+                        ? [{label: "None", value: 0}, {label: "List files only", value: 4},
+                           {label: "Access files", value: 5}, {label: "Create and delete files", value: 7}]
+                        : [{label: "None", value: 0}, {label: "Read-only", value: 4},
+                           {label: "Write-only", value: 2}, {label: "Read and write", value: 6}];
+                    if (!options.some(function(option) { return option.value === access; }))
+                        options.push({label: "Custom access (" + access.toString(8) + ")", value: access});
+                    return options;
+                }
+                textRole: "label"
+                currentIndex: model.findIndex(function(option) { return option.value === access; })
+                onActivated: function(index) { propsModal.setAccess(permissionRow.shift, model[index].value); }
+            }
         }
 
         RowLayout {
@@ -4852,9 +4917,18 @@ ApplicationWindow {
             spacing: 12
 
             SeabunnyIcon {
-                name: propsModal.info.is_dir ? "folder" : "file-text"
+                visible: theme.usesGlyphIcons
+                name: propsModal.info.icon || "file"
                 size: 32
                 color: theme.primary
+            }
+            Image {
+                visible: !theme.usesGlyphIcons
+                source: theme.iconUrl(propsModal.info.icon_path || "")
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                sourceSize: Qt.size(32, 32)
+                fillMode: Image.PreserveAspectFit
             }
 
             ColumnLayout {
@@ -4870,7 +4944,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
                 Text {
-                    text: propsModal.info.is_dir ? "Folder" : "File"
+                    text: propsModal.info.is_symlink ? "Symbolic link" : propsModal.info.is_dir ? "Folder" : "File"
                     color: theme.textMuted
                     font.pixelSize: 11
                 }
@@ -4906,13 +4980,70 @@ ApplicationWindow {
             }
         }
 
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 4
+            Text {
+                text: "Permissions"
+                color: theme.textMain
+                font.pixelSize: 13
+                font.bold: true
+            }
+            PermissionRow { label: "Owner"; shift: 6 }
+            PermissionRow { label: "Group"; shift: 3 }
+            PermissionRow { label: "Others"; shift: 0 }
+            SeabunnySwitch {
+                id: executableSwitch
+                objectName: "makeExecutableSwitch"
+                visible: !!propsModal.info.is_regular
+                enabled: propsModal.permissionsEditable
+                label: "Make executable"
+                checked: (propsModal.permissionMode & 0o111) !== 0
+                onToggled: function(checked) {
+                    propsModal.setExecutable(checked);
+                    executableSwitch.checked = Qt.binding(function() { return (propsModal.permissionMode & 0o111) !== 0; });
+                }
+            }
+            Text {
+                visible: !!propsModal.info.is_regular
+                text: "Allow the owner and users with read access to run this file as a program."
+                color: theme.textMuted
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Text {
+                visible: text.length > 0
+                text: propsModal.info.permissions_note || (!propsModal.info.permission_identity ? "Permissions are unavailable." : "")
+                color: theme.textMuted
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Text {
+                objectName: "permissionError"
+                visible: text.length > 0
+                text: propsModal.permissionError
+                color: theme.danger
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Item { Layout.fillWidth: true }
             SeabunnyButton {
-                text: "OK"
-                variant: "filled"
+                text: propsModal.permissionsChanged ? "Cancel" : "Close"
                 onClicked: propsModal.close()
+            }
+            SeabunnyButton {
+                objectName: "savePermissionsButton"
+                text: "Save"
+                variant: "filled"
+                enabled: propsModal.permissionsEditable && propsModal.permissionsChanged
+                onClicked: propsModal.savePermissions()
             }
         }
     }

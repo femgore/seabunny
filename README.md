@@ -30,6 +30,7 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 - hidden files shown by default. ctrl+h if you'd rather pretend `.config` doesn't exist
 - trash, restore, copy/paste, drag and drop, and undo/redo for when you do some stupid shit
 - read-only archive browsing and extraction
+- file permissions in properties, including a make executable switch. no terminal detour
 - built-in palettes, light/dark modes, reduced motion, and optional live Serpantinum colors
 - a matching file picker for apps using desktop portals. yes, i got distracted by that too
 

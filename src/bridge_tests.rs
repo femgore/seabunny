@@ -1,5 +1,32 @@
 use super::*;
 
+#[test]
+fn archive_and_application_icons_agree_across_icon_sources() {
+    for name in ["a.rar", "a.RAR", "a.7z", "a.tar.gz", "a.tgz", "a.cab", "a.iso", "a.zip"] {
+        let path = Path::new(name);
+        assert_eq!(icon_for_file(path, false).1, "archive", "{name}");
+        assert_eq!(system_icon_for_file(path, false), "package-x-generic", "{name}");
+    }
+    for name in ["a.AppImage", "a.appimage", "a.RUN", "a.exe"] {
+        assert_eq!(icon_for_file(Path::new(name), false), ("terminal", "application"));
+        assert_eq!(system_icon_for_file(Path::new(name), false), "application-x-executable");
+    }
+    for name in ["a.deb", "a.rpm", "a.flatpak"] {
+        assert_eq!(icon_for_file(Path::new(name), false), ("package", "application"));
+        assert_eq!(system_icon_for_file(Path::new(name), false), "package-x-generic");
+    }
+    let fixture = Fixture::new();
+    let path = fixture.0.join("program");
+    fs::write(&path, "synthetic").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(system_icon_for_file(&path, false), "application-x-executable");
+    assert_eq!(icon_for_file(&path, false), ("terminal", "application"));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(icon_for_file(&path, false), ("file", "file"));
+    assert_eq!(icon_for_file(Path::new("folder.AppImage"), true), ("folder", "folder"));
+}
+
 struct Fixture(PathBuf);
 
 impl Fixture {

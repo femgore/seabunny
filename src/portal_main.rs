@@ -1,6 +1,7 @@
 pub mod bridge;
 mod favorites;
 mod folder_sort;
+mod permissions;
 mod archive;
 
 use cxx_qt_lib::QGuiApplication;

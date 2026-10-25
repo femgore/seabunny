@@ -158,6 +158,9 @@ pub mod qobject {
         fn get_item_info(self: &SeabunnyEngine, path: &QString) -> QString;
 
         #[qinvokable]
+        fn set_item_permissions(self: Pin<&mut SeabunnyEngine>, path: &QString, identity: &QString, expected_mode: u32, mode: u32) -> QString;
+
+        #[qinvokable]
         fn set_sort(self: Pin<&mut SeabunnyEngine>, sort_by: &QString, ascending: bool);
 
         #[qinvokable]
@@ -475,6 +478,10 @@ pub struct ItemInfo {
     pub size: String,
     pub is_dir: bool,
     pub modified: String,
+    pub icon: String,
+    pub icon_path: String,
+    #[serde(flatten)]
+    pub permissions: Option<crate::permissions::PermissionInfo>,
 }
 
 pub struct SeabunnyEngineRust {
@@ -1520,10 +1527,18 @@ fn icon_for_file(path: &Path, is_dir: bool) -> (&'static str, &'static str) {
         "rs" | "nix" | "js" | "ts" | "jsx" | "tsx" | "py" | "c" | "cpp" | "h" | "hpp" | "lua" | "go" | "java" | "kt" => ("file-code", "code"),
         "sh" | "bash" | "zsh" | "fish" => ("code", "code"),
         "zip" => ("file-zip", "archive"),
-        "tar" | "gz" | "xz" | "zst" | "bz2" | "7z" | "rar" | "tgz" | "txz" | "tbz2" | "cab" | "arj" | "lha" | "lzh" | "cpio" | "iso" => ("file-archive", "archive"),
+        "tar" | "gz" | "xz" | "zst" | "bz2" | "7z" | "rar" | "tgz" | "txz" | "tbz" | "tbz2" | "tzst" | "cab" | "arj" | "lha" | "lzh" | "cpio" | "iso" => ("file-archive", "archive"),
+        "appimage" | "run" | "bin" | "exe" => ("terminal", "application"),
+        "deb" | "rpm" | "flatpak" | "flatpakref" => ("package", "application"),
+        "desktop" => ("desktop", "application"),
         "pdf" => ("file-pdf", "document"),
         "md" | "txt" | "json" | "toml" | "yaml" | "yml" | "csv" | "log" | "doc" | "docx" | "odt" => ("file-text", "text"),
-        _ => ("file", "file"),
+        _ => {
+            use std::os::unix::fs::PermissionsExt;
+            if fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0) {
+                ("terminal", "application")
+            } else { ("file", "file") }
+        },
     }
 }
 
@@ -1532,16 +1547,15 @@ fn system_icon_for_file(path: &Path, is_dir: bool) -> &'static str {
         return "folder";
     }
 
-    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_lowercase();
-    if is_picture_format(&ext) {
-        return "image-x-generic";
-    }
-
-    match ext.as_str() {
-        "mp3" | "flac" | "wav" | "ogg" | "m4a" => "audio-x-generic",
-        "mp4" | "mkv" | "webm" | "mov" | "avi" => "video-x-generic",
-        "rs" | "nix" | "js" | "ts" | "jsx" | "tsx" | "py" | "c" | "cpp" | "h" | "lua" | "html" | "css" => "text-x-script",
-        "zip" | "tar" | "gz" | "xz" | "zst" | "bz2" | "7z" => "package-x-generic",
+    match icon_for_file(path, false).0 {
+        "file-image" => "image-x-generic",
+        "file-audio" => "audio-x-generic",
+        "file-video" => "video-x-generic",
+        "file-code" | "file-html" | "file-css" | "code" => "text-x-script",
+        "file-zip" | "file-archive" | "package" => "package-x-generic",
+        "terminal" => "application-x-executable",
+        "desktop" => "application-x-desktop",
+        "file-pdf" => "application-pdf",
         _ => "text-x-generic",
     }
 }
@@ -3295,9 +3309,26 @@ impl qobject::SeabunnyEngine {
             size: size_str,
             is_dir,
             modified: mod_str,
+            icon: icon_for_file(&p, is_dir).0.into(),
+            icon_path: resolve_system_icon(system_icon_for_file(&p, is_dir)),
+            permissions: crate::permissions::inspect(&p).ok(),
         };
 
         serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string()).into()
+    }
+
+    pub fn set_item_permissions(mut self: Pin<&mut Self>, path: &QString, identity: &QString, expected_mode: u32, mode: u32) -> QString {
+        let result = if !self.archive_path().to_string().is_empty() || qobject::seabunny_portal_mode() {
+            Err("Permissions cannot be changed in this view.".into())
+        } else {
+            crate::permissions::apply(Path::new(&path.to_string()), &identity.to_string(), expected_mode, mode)
+        };
+        if let Err(error) = result {
+            return serde_json::json!({"error": error}).to_string().into();
+        }
+        self.as_mut().file_operation_finished();
+        self.as_mut().refresh();
+        self.get_item_info(path)
     }
 
     pub fn undo(mut self: Pin<&mut Self>) {
