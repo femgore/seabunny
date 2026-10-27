@@ -360,16 +360,11 @@ Item {
             : Math.max(88, Math.min(420, available / columns));
     }
     function zoomFiles(direction) { if (isList()) theme.stepZoom(direction); else zoomGrid(direction); }
-
-    // Keep zoom input on the pane so delegates and the Flickable cannot swallow it.
-    WheelHandler {
-        target: null
-        acceptedModifiers: Qt.ControlModifier
-        onWheel: function(event) {
-            var delta = event.angleDelta.y || event.pixelDelta.y;
-            if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
-            event.accepted = true;
-        }
+    function handleZoomWheel(event) {
+        if (!(event.modifiers & Qt.ControlModifier)) return false;
+        var delta = event.angleDelta.y || event.pixelDelta.y;
+        if (delta) zoomFiles(delta > 0 ? 1 : -1);
+        return true;
     }
 
     ParallelAnimation {
@@ -837,6 +832,15 @@ Item {
                     }
                 }
 
+                MouseArea {
+                    anchors.fill: parent
+                    z: 200
+                    acceptedButtons: Qt.NoButton
+                    onWheel: function(wheel) {
+                        wheel.accepted = pane.handleZoomWheel(wheel);
+                    }
+                }
+
                 WheelHandler {
                     target: null
                     acceptedModifiers: Qt.NoModifier
@@ -1102,8 +1106,11 @@ Item {
                                 }
 
                                 Rectangle {
-                                    anchors.fill: parent
-                                    radius: theme.radiusM
+                                    x: thumbImg.x + (thumbImg.width - thumbImg.paintedWidth) / 2
+                                    y: thumbImg.y + (thumbImg.height - thumbImg.paintedHeight) / 2
+                                    width: thumbImg.paintedWidth
+                                    height: thumbImg.paintedHeight
+                                    radius: Math.min(theme.radiusM, width / 2, height / 2)
                                     color: "transparent"
                                     border.color: card.isSelected ? theme.primary : theme.outlineVariant
                                     border.width: 1
@@ -1342,6 +1349,14 @@ Item {
                     }
                 }
 
+                MouseArea {
+                    anchors.fill: parent
+                    z: 200
+                    acceptedButtons: Qt.NoButton
+                    onWheel: function(wheel) {
+                        wheel.accepted = pane.handleZoomWheel(wheel);
+                    }
+                }
                 footer: Item {
                     width: listView.width
                     height: 80

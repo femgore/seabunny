@@ -571,7 +571,7 @@ Item {
                                     spacing: 3
                                     Layout.fillWidth: true
                                     Text { text: qsTr("Icon style"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                                    Text { text: qsTr("Phosphor, Serpantinum Symbols, system theme, or GNOME Adwaita"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Phosphor, Serpantinum Symbols, System / GNOME, or Adwaita"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
 
@@ -583,7 +583,7 @@ Item {
                                     Repeater {
                                         model: [{key:"phosphor",title:qsTr("Phosphor")},
                                             {key:"serpantinum",title:qsTr("Serpantinum Symbols")},
-                                            {key:"system",title:qsTr("System")}, {key:"adwaita",title:qsTr("Adwaita")}]
+                                            {key:"system",title:qsTr("System / GNOME")}, {key:"adwaita",title:qsTr("Adwaita")}]
                                         delegate: SeabunnyButton {
                                             objectName: "iconStyle_" + modelData.key
                                             text: modelData.title
