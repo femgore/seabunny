@@ -68,7 +68,9 @@ jobs:
             cat /tmp/seabunny-makepkg.log
           else
             result=$?
-            tail -n 25 /tmp/seabunny-makepkg.log | while IFS= read -r line; do
+            diagnostics="$(grep -Ei 'error|failed|not found|no such file|fatal|cannot' /tmp/seabunny-makepkg.log | tail -n 8 || true)"
+            if [ -z "$diagnostics" ]; then diagnostics="$(tail -n 8 /tmp/seabunny-makepkg.log)"; fi
+            printf '%s\n' "$diagnostics" | while IFS= read -r line; do
               echo "::error title=makepkg diagnostic::$line"
             done
             exit "$result"
@@ -124,7 +126,9 @@ jobs:
             ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
             > /tmp/seabunny-appimage.log 2>&1 || {
               result=$?
-              tail -n 25 /tmp/seabunny-appimage.log | while IFS= read -r line; do
+              diagnostics="$(grep -Ei 'error|failed|not found|no such file|fatal|cannot' /tmp/seabunny-appimage.log | tail -n 8 || true)"
+              if [ -z "$diagnostics" ]; then diagnostics="$(tail -n 8 /tmp/seabunny-appimage.log)"; fi
+              printf '%s\n' "$diagnostics" | while IFS= read -r line; do
                 echo "::error title=AppImage diagnostic::$line"
               done
               exit "$result"
