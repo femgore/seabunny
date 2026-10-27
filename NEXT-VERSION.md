@@ -77,10 +77,11 @@ building a package also doesn't install it:
 python3 -B packaging/seabunny/package_user.py build --with-portal
 ```
 
-installation and portal selection remain explicit steps. see the
-[installation guide](packaging/seabunny/README.md) and
-[portal guide](packaging/seabunny/PORTAL.md). keep the old versioned payload until
-you've actually used this one. having a fallback is less exciting than needing one.
+installation and portal selection are separate steps. the installed explorer and
+registered portal now both use 0.2.0; the previous versioned payloads remain as a
+fallback. see the [installation guide](packaging/seabunny/README.md) and
+[portal guide](packaging/seabunny/PORTAL.md). having a fallback is less exciting
+than needing one.
 
 ## bugs fixed during the port
 
@@ -139,7 +140,8 @@ without touching your desktop.
 - package installation and portal rollback pass inside a disposable home
 
 these checks don't replace trying the visible windows on your actual desktop.
-the installed 0.1 payload and active portal routing haven't been switched.
+the current installed explorer and registered portal service both use the 0.2.0
+payload; existing portal preferences were left as they were.
 
 ## things that still need real-world testing
 

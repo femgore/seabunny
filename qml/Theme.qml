@@ -46,6 +46,8 @@ Item {
     // "auto" turns low-power mode on when Qt renders without a GPU.
     property string lowPowerSetting: "auto" // "auto", "on", "off"
     property bool reduceMotionSetting: false
+    property bool smoothScrollSetting: true
+    property int scrollAmountSetting: 80 // pixels per wheel step at 100% grid zoom
     readonly property bool softwareRendering: GraphicsInfo.api === GraphicsInfo.Software
     readonly property bool lowPower: lowPowerSetting === "on"
         || (lowPowerSetting === "auto" && (softwareRendering || (typeof core !== "undefined" && core && core.low_end_hardware)))
@@ -2069,6 +2071,11 @@ Item {
         if (value.length > 0) lowPowerSetting = value;
         value = readSetting("reduceMotion");
         if (value.length > 0) reduceMotionSetting = (value === "true");
+        value = readSetting("smoothScroll");
+        if (value.length > 0) smoothScrollSetting = (value === "true");
+        value = readSetting("scrollAmount");
+        if (value.length > 0 && isFinite(Number(value)))
+            scrollAmountSetting = Math.max(20, Math.min(240, Math.round(Number(value) / 10) * 10));
         value = readSetting("gridItemSize");
         if (value.length > 0 && isFinite(Number(value))) gridItemSize = Math.max(88, Math.min(420, Number(value)));
         else {
@@ -2123,6 +2130,8 @@ Item {
     onShareThrottleKbpsChanged: writeSetting("shareThrottleKbps", shareThrottleKbps)
     onLowPowerSettingChanged: writeSetting("lowPower", lowPowerSetting)
     onReduceMotionSettingChanged: writeSetting("reduceMotion", reduceMotionSetting)
+    onSmoothScrollSettingChanged: writeSetting("smoothScroll", smoothScrollSetting)
+    onScrollAmountSettingChanged: writeSetting("scrollAmount", scrollAmountSetting)
     onGridItemSizeChanged: writeSetting("gridItemSize", gridItemSize)
     onFontScaleSettingChanged: writeSetting("fontScale", fontScaleSetting)
     onClickToRenameChanged: writeSetting("clickToRename", clickToRename)

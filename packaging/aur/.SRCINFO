@@ -1,0 +1,27 @@
+pkgbase = seabunny
+	pkgdesc = Qt/QML file manager with an optional XDG Desktop Portal file chooser
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://github.com/femgore/seabunny
+	arch = x86_64
+	license = MIT
+	makedepends = rust
+	makedepends = cargo
+	makedepends = cmake
+	makedepends = ninja
+	makedepends = pkgconf
+	depends = qt6-base
+	depends = qt6-declarative
+	depends = qt6-svg
+	depends = qt6-wayland
+	depends = kwindowsystem
+	depends = glib2
+	depends = python
+	depends = libarchive
+	depends = 7zip
+	depends = zip
+	optdepends = ffmpeg: video thumbnails
+	source = git+https://github.com/femgore/seabunny.git#tag=v0.2.0
+	sha256sums = SKIP
+
+pkgname = seabunny

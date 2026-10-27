@@ -44,32 +44,19 @@ Item {
     readonly property bool card19Match: matchesQuery("experimental share via link cloudflare tunnel p2p host local send")
     readonly property bool card20Match: matchesQuery("share settings link compression password expiration throttle active shares cloudflare tunnel")
     readonly property bool card21Match: matchesQuery("network smb samba nas share server mount connect remote windows keyring")
+    readonly property bool card22Match: matchesQuery("smooth scrolling wheel scroll animation")
+    readonly property bool card23Match: matchesQuery("scroll amount distance speed wheel pixels")
 
     readonly property int interfaceMatches: (card1Match ? 1 : 0) + (card2Match ? 1 : 0) + (card4Match ? 1 : 0) + (card5Match ? 1 : 0)
     readonly property int behaviorMatches: (card6Match ? 1 : 0) + (card7Match ? 1 : 0) + (card8Match ? 1 : 0) + (card9Match ? 1 : 0)
         + (card16Match ? 1 : 0) + (card17Match ? 1 : 0) + (card18Match ? 1 : 0)
+        + (card22Match ? 1 : 0) + (card23Match ? 1 : 0)
     readonly property int accessibilityMatches: (card13Match ? 1 : 0) + (card14Match ? 1 : 0) + (card15Match ? 1 : 0)
     readonly property int experimentalMatches: (card10Match ? 1 : 0) + (card12Match ? 1 : 0) + (card19Match ? 1 : 0)
     readonly property int shareMatches: theme.shareViaLinkEnabled && card20Match ? 1 : 0
     readonly property int networkMatches: (card21Match ? 1 : 0)
     readonly property int aboutMatches: (card11Match ? 1 : 0)
     readonly property int totalMatches: interfaceMatches + behaviorMatches + accessibilityMatches + experimentalMatches + shareMatches + networkMatches + aboutMatches
-
-    // Space still claimed above `panel` by panels that are painted while fading
-    // out. Overlapping the incoming tab with the outgoing one lets the switch
-    // cross-fade instead of dropping the outgoing panel in one frame.
-    function fadeOverlapAbove(panel) {
-        var panels = [tabInterface, tabBehavior, tabAccessibility, tabExperimental, tabShare, tabNetwork, tabAbout];
-        var overlap = 0;
-        for (var i = 0; i < panels.length; i++) {
-            var p = panels[i];
-            if (!p || p === panel)
-                break;
-            if (p.visible && !p.shown)
-                overlap += p.implicitHeight + contentColumn.spacing;
-        }
-        return overlap;
-    }
 
     RowLayout {
         anchors.fill: parent
@@ -314,13 +301,11 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.interfaceMatches > 0) : (settingsView.activeTab === 0)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabInterface)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        // Hide the outgoing page immediately so settings from
+                        // two tabs cannot be drawn together during the fade.
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -503,7 +488,8 @@ Item {
                                         ]
 
                                         delegate: Item {
-                                            width: 126; height: 38
+                                            width: Math.max(126, paletteName.implicitWidth + 56)
+                                            height: Math.max(38, paletteName.implicitHeight + 18)
 
                                             readonly property var swatch: (modelData.id === "auto" || modelData.id === "serpantinum") && theme.serpantinumPalette
                                                 ? theme.serpantinumPalette : (theme.palettes[modelData.id] || theme.palettes["wallpaper"])
@@ -531,10 +517,12 @@ Item {
                                                         color: swatch.darkPrimary
                                                     }
                                                     Text {
+                                                        id: paletteName
                                                         text: modelData.label
                                                         color: theme.accentName === modelData.id ? theme.primaryContainerFg : theme.textMain
                                                         font.pixelSize: theme.fs(11)
                                                         font.bold: theme.accentName === modelData.id
+                                                        wrapMode: Text.NoWrap
                                                         Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                                     }
                                                 }
@@ -669,13 +657,9 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.behaviorMatches > 0) : (settingsView.activeTab === 1)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabBehavior)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -732,6 +716,84 @@ Item {
                                             Text { anchors.centerIn: parent; text: qsTr("Pan View"); color: theme.dragAction === "scroll" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true }
                                         }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.dragAction = "scroll" }
+                                    }
+                                }
+                            }
+                        }
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card22Match
+                            title: qsTr("Smooth scrolling")
+                            subtitle: qsTr("Ease wheel scrolling instead of moving in abrupt steps")
+                            SeabunnySwitch {
+                                checked: theme.smoothScrollSetting
+                                onToggled: function(c) { theme.smoothScrollSetting = c; }
+                            }
+                        }
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card23Match
+                            title: qsTr("Scroll amount")
+                            subtitle: qsTr("Distance moved for each mouse-wheel step")
+                            RowLayout {
+                                spacing: 10
+                                Text {
+                                    text: qsTr("%1 px").arg(theme.scrollAmountSetting)
+                                    color: theme.textMain
+                                    font.pixelSize: theme.fs(12)
+                                    Layout.preferredWidth: 48
+                                }
+                                Item {
+                                    id: scrollAmountControl
+                                    implicitWidth: 220
+                                    implicitHeight: 32
+                                    Layout.minimumWidth: 180
+                                    Layout.preferredWidth: 220
+                                    Layout.fillWidth: true
+                                    activeFocusOnTab: true
+                                    Accessible.role: Accessible.Slider
+                                    Accessible.name: qsTr("Scroll amount")
+                                    function setFromX(x) {
+                                        var ratio = Math.max(0, Math.min(1, (x - scrollTrack.x) / scrollTrack.width));
+                                        theme.scrollAmountSetting = 20 + Math.round(ratio * 22) * 10;
+                                    }
+                                    Keys.onLeftPressed: theme.scrollAmountSetting = Math.max(20, theme.scrollAmountSetting - 10)
+                                    Keys.onRightPressed: theme.scrollAmountSetting = Math.min(240, theme.scrollAmountSetting + 10)
+                                    Rectangle {
+                                        id: scrollTrack
+                                        x: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: Math.max(1, parent.width - 16)
+                                        height: 4
+                                        radius: 2
+                                        color: theme.surfaceContainerHighest
+                                        Rectangle {
+                                            width: ((theme.scrollAmountSetting - 20) / 220) * parent.width
+                                            height: parent.height
+                                            radius: parent.radius
+                                            color: theme.primary
+                                        }
+                                    }
+                                    Rectangle {
+                                        x: scrollTrack.x + ((theme.scrollAmountSetting - 20) / 220) * scrollTrack.width - width / 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 16
+                                        height: 16
+                                        radius: 8
+                                        color: theme.primary
+                                        border.color: theme.surface
+                                        border.width: 2
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onPressed: function(mouse) {
+                                            scrollAmountControl.forceActiveFocus();
+                                            scrollAmountControl.setFromX(mouse.x);
+                                        }
+                                        onPositionChanged: function(mouse) {
+                                            if (pressed)
+                                                scrollAmountControl.setFromX(mouse.x);
+                                        }
                                     }
                                 }
                             }
@@ -926,13 +988,9 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.accessibilityMatches > 0) : (settingsView.activeTab === 2)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabAccessibility)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -981,13 +1039,9 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.experimentalMatches > 0) : (settingsView.activeTab === 3)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabExperimental)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -1130,13 +1184,9 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.shareMatches > 0) : (theme.shareViaLinkEnabled && settingsView.activeTab === 5)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabShare)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -1488,13 +1538,9 @@ Item {
                         }
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.networkMatches > 0) : (settingsView.activeTab === 6)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabNetwork)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -1613,13 +1659,9 @@ Item {
                         spacing: 14
 
                         readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.aboutMatches > 0) : (settingsView.activeTab === 4)
-                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabAbout)
                         property real slideOffset: shown ? 0 : 6
 
-                        Layout.topMargin: -fadeOverlap
-                        Layout.bottomMargin: fadeOverlap
-
-                        visible: shown || opacity > 0.001
+                        visible: shown
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
@@ -1656,7 +1698,7 @@ Item {
                                         SeabunnyIcon { name: "github-logo"; size: 14; color: theme.primary }
                                         Text {
                                             id: ghLink
-                                            text: qsTr("github.com/femgore/seabunny · upstream by m-uvex")
+                                            text: qsTr("github.com/femgore/seabunny")
                                             color: ghMouse.containsMouse ? theme.primary : theme.outline
                                             font.pixelSize: theme.fs(11)
                                             font.underline: ghMouse.containsMouse

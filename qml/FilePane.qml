@@ -26,6 +26,7 @@ Item {
     // Selected after the next load (new folder, pasted items, ...).
     property var pendingSelect: []
     property bool pendingRename: false
+    property bool gridGeometryChanging: false
 
     signal activated()
 
@@ -154,7 +155,9 @@ Item {
     }
 
     function cols() {
-        return isList() ? 1 : Math.max(1, Math.floor(gridView.width / gridView.cellWidth));
+        // `cellW` is width / gridColumns; dividing back can round down by one
+        // after a zoom or fractional window resize. Use the source count.
+        return isList() ? 1 : gridColumns;
     }
 
     function isList() {
@@ -341,6 +344,9 @@ Item {
     }
 
     readonly property real zoom: theme.zoom
+    property var wheelScrollView: null
+    property real wheelScrollTarget: 0
+    readonly property int gridCellGap: 8
     readonly property int gridColumns: Math.max(1, Math.floor(gridView.width / theme.gridItemSize + 0.000001))
     readonly property real cellW: Math.max(1, gridView.width / gridColumns)
     readonly property real cellH: cellW
@@ -352,6 +358,8 @@ Item {
     function zoomGrid(direction) {
         var available = gridView.width;
         if (available <= 0) return;
+        gridGeometryChanging = true;
+        gridGeometryTimer.restart();
         var minimum = Math.max(1, Math.floor(available / 420 + 0.000001));
         var maximum = Math.max(1, Math.floor(available / 88 + 0.000001));
         var columns = Math.max(minimum, Math.min(maximum, gridColumns - direction));
@@ -360,11 +368,47 @@ Item {
             : Math.max(88, Math.min(420, available / columns));
     }
     function zoomFiles(direction) { if (isList()) theme.stepZoom(direction); else zoomGrid(direction); }
-    function handleZoomWheel(event) {
-        if (!(event.modifiers & Qt.ControlModifier)) return false;
+    function handleWheel(event, view) {
         var delta = event.angleDelta.y || event.pixelDelta.y;
-        if (delta) zoomFiles(delta > 0 ? 1 : -1);
+        if (!delta) return false;
+        if (event.modifiers & Qt.ControlModifier) {
+            zoomFiles(delta > 0 ? 1 : -1);
+            return true;
+        }
+
+        var scale = pane.isList() ? 1 : pane.zoom;
+        var distance = event.angleDelta.y
+            ? theme.scrollAmountSetting * event.angleDelta.y / 120
+            : event.pixelDelta.y * theme.scrollAmountSetting / 80;
+        var maximum = Math.max(0, view.contentHeight - view.height);
+        var base = wheelScrollView === view && wheelScrollAnimation.running
+            ? wheelScrollTarget : view.contentY;
+        var target = Math.max(0, Math.min(maximum, base - distance * scale));
+        wheelScrollView = view;
+        wheelScrollTarget = target;
+        wheelScrollAnimation.stop();
+        if (theme.smoothScrollSetting) {
+            wheelScrollAnimation.target = view;
+            wheelScrollAnimation.to = target;
+            wheelScrollAnimation.start();
+        } else {
+            view.contentY = target;
+        }
         return true;
+    }
+
+    NumberAnimation {
+        id: wheelScrollAnimation
+        property: "contentY"
+        duration: 160
+        easing.type: Easing.OutCubic
+    }
+
+    Timer {
+        id: gridGeometryTimer
+        interval: 280
+        repeat: false
+        onTriggered: pane.gridGeometryChanging = false
     }
 
     ParallelAnimation {
@@ -460,7 +504,11 @@ Item {
                     target: gridView
                     function onContentYChanged() { selectionCanvas.requestPaint(); }
                     function onContentXChanged() { selectionCanvas.requestPaint(); }
-                    function onWidthChanged() { selectionCanvas.requestPaint(); }
+                    function onWidthChanged() {
+                        pane.gridGeometryChanging = true;
+                        gridGeometryTimer.restart();
+                        selectionCanvas.requestPaint();
+                    }
                 }
                 Connections {
                     target: listView
@@ -479,8 +527,16 @@ Item {
                 Connections {
                     target: gridView
                     function onCountChanged() { repaintTimer.restart(); }
-                    function onCellWidthChanged() { repaintTimer.restart(); }
-                    function onCellHeightChanged() { repaintTimer.restart(); }
+                    function onCellWidthChanged() {
+                        pane.gridGeometryChanging = true;
+                        gridGeometryTimer.restart();
+                        repaintTimer.restart();
+                    }
+                    function onCellHeightChanged() {
+                        pane.gridGeometryChanging = true;
+                        gridGeometryTimer.restart();
+                        repaintTimer.restart();
+                    }
                 }
                 Connections {
                     target: listView
@@ -531,85 +587,54 @@ Item {
                         paintBlock(ctx, sel);
                 }
 
-                // Traces the outline of the selected cells and fills it.
+                // Paint each selected item's own hit area. Separate shapes
+                // leave the inter-item gaps visibly empty.
                 function paintBlock(ctx, sel) {
-                    // Every side of a selected cell that faces an unselected
-                    // cell becomes a directed edge (clockwise, interior on the
-                    // right). One row of slack on each side of the viewport
-                    // keeps shapes that leave the screen open instead of
-                    // closing them off at the edge.
-                    var isList = pane.isList();
-                    var cols = isList ? 1 : pane.cols();
-                    var segs = [];
                     var visible = visibleIndices();
-                    // Neighbours only count when they are traced too, otherwise
-                    // the walk dead-ends and the fill gets cut off at the edge.
-                    var traced = {};
-                    for (var t = 0; t < visible.length; ++t)
-                        traced[visible[t]] = true;
-                    for (var k = 0; k < visible.length; ++k) {
-                        var idx = visible[k];
+                    var radius = ctxRadius();
+                    ctx.beginPath();
+                    for (var i = 0; i < visible.length; ++i) {
+                        var idx = visible[i];
                         if (!sel[idx])
                             continue;
-                        var g = baseRect(idx, sel, cols, traced);
-                        if (!g.up) segs.push([g.x0, g.y0, g.x1, g.y0]);
-                        if (!g.right) segs.push([g.x1, g.y0, g.x1, g.y1]);
-                        if (!g.down) segs.push([g.x1, g.y1, g.x0, g.y1]);
-                        if (!g.left) segs.push([g.x0, g.y1, g.x0, g.y0]);
+                        var g = baseRect(idx);
+                        var r = Math.min(radius, (g.x1 - g.x0) / 2, (g.y1 - g.y0) / 2);
+                        ctx.moveTo(g.x0 + r, g.y0);
+                        ctx.arcTo(g.x1, g.y0, g.x1, g.y0 + r, r);
+                        ctx.arcTo(g.x1, g.y1, g.x1 - r, g.y1, r);
+                        ctx.arcTo(g.x0, g.y1, g.x0, g.y1 - r, r);
+                        ctx.arcTo(g.x0, g.y0, g.x0 + r, g.y0, r);
+                        ctx.closePath();
                     }
-                    if (segs.length === 0)
-                        return;
-                    var loops = traceLoops(segs);
-                    var rad = ctxRadius();
-                    ctx.beginPath();
-                    for (var l = 0; l < loops.length; ++l)
-                        addLoop(ctx, loops[l], rad);
-
                     ctx.fillStyle = cssColor(theme.secondaryContainer);
                     ctx.fill();
                     ctx.strokeStyle = cssColor(theme.primary);
                     ctx.lineWidth = 1.5;
-                    ctx.lineJoin = "round";
                     ctx.stroke();
                 }
 
-                // Final rect of one row/index in canvas coordinates. Selected
-                // neighbours pull the shared edge out to the grid line so two
-                // adjacent cells meet exactly; unselected sides keep the inner
-                // padding, which is what gives the block its soft outline.
-                function baseRect(idx, sel, cols, traced) {
-                    traced = traced || {};
-                    var on = function (n) { return n >= 0 && !!traced[n] && !!sel[n]; };
+                // Bounds match the actual item areas; gaps stay unpainted.
+                function baseRect(idx) {
                     if (pane.isList()) {
                         var rowH = Math.round(38 * Math.max(0.85, Math.min(1.3, pane.zoom)));
-                        var ly = Math.round(listHeader.height + 6 + idx * (rowH + 3) - listView.contentY);
-                        var up = idx > 0 && on(idx - 1);
-                        var down = on(idx + 1);
+                        var ly = Math.round(listHeader.height + 6 + idx * (rowH + listView.spacing) - listView.contentY);
                         return {
-                            x0: 2, x1: listView.width - 2,
-                            // Rows are 3px apart: a selected neighbour pulls
-                            // the edge across the gap so the run is continuous.
-                            y0: up ? ly : ly + 2,
-                            y1: down ? ly + rowH + 3 : ly + rowH - 2,
-                            up: up, down: down, left: false, right: false
+                            x0: 0, x1: listView.width,
+                            y0: ly, y1: ly + rowH
                         };
                     }
                     var cw = gridView.cellWidth;
                     var ch = gridView.cellHeight;
+                    var cols = pane.cols();
                     var c = idx % cols;
                     var row = Math.floor(idx / cols);
-                    var isUp = idx >= cols && on(idx - cols);
-                    var isDown = on(idx + cols);
-                    var isLeft = c > 0 && on(idx - 1);
-                    var isRight = c < cols - 1 && on(idx + 1);
-                    // No inset: cells must share their corners so two cells
-                    // touching diagonally can be joined by one smooth outline.
+                    // The stroke's outer edge ends at the inset hit boundary.
+                    var inset = pane.gridCellGap / 2 + 0.75;
                     return {
-                        x0: Math.round(c * cw - gridView.contentX),
-                        x1: Math.round((c + 1) * cw - gridView.contentX),
-                        y0: Math.round(row * ch - gridView.contentY),
-                        y1: Math.round((row + 1) * ch - gridView.contentY),
-                        up: isUp, down: isDown, left: isLeft, right: isRight
+                        x0: c * cw + inset - gridView.contentX,
+                        x1: (c + 1) * cw - inset - gridView.contentX,
+                        y0: row * ch + inset - gridView.contentY,
+                        y1: (row + 1) * ch - inset - gridView.contentY
                     };
                 }
 
@@ -620,7 +645,7 @@ Item {
                     if (count <= 0)
                         return out;
                     if (pane.isList()) {
-                        var rowH = Math.round(38 * Math.max(0.85, Math.min(1.3, pane.zoom))) + 3;
+                        var rowH = Math.round(38 * Math.max(0.85, Math.min(1.3, pane.zoom))) + listView.spacing;
                         var first = Math.max(0, Math.floor(listView.contentY / rowH) - 1);
                         var last = Math.min(count - 1, Math.ceil((listView.contentY + height) / rowH) + 1);
                         for (var i = first; i <= last; ++i)
@@ -641,98 +666,6 @@ Item {
                     return out;
                 }
 
-                // Walk the directed edges. At a vertex with two ways out (two
-                // selected cells touching diagonally) keep turning as far left
-                // as possible: that bridges the diagonal instead of treating
-                // the cells as two separate shapes.
-                function traceLoops(segs) {
-                    var key = function (x, y) { return x + "," + y; };
-                    var outs = {};
-                    for (var i = 0; i < segs.length; ++i) {
-                        var s = segs[i];
-                        var k = key(s[0], s[1]);
-                        if (!outs[k])
-                            outs[k] = [];
-                        outs[k].push({ x2: s[2], y2: s[3], used: false });
-                    }
-
-                    var loops = [];
-                    for (var a = 0; a < segs.length; ++a) {
-                        var s0 = segs[a];
-                        var bucket = outs[key(s0[0], s0[1])];
-                        if (!bucket)
-                            continue;
-                        var edge = null;
-                        for (var b = 0; b < bucket.length; ++b) {
-                            if (!bucket[b].used && bucket[b].x2 === s0[2] && bucket[b].y2 === s0[3]) {
-                                edge = bucket[b];
-                                break;
-                            }
-                        }
-                        if (!edge)
-                            continue;
-
-                        var pts = [];
-                        var cx = s0[0], cy = s0[1], ex = s0[2], ey = s0[3];
-                        var sx = cx, sy = cy;
-                        edge.used = true;
-                        pts.push([cx, cy]);
-                        var guard = 0;
-                        while (guard++ < 200000) {
-                            pts.push([ex, ey]);
-                            if (ex === sx && ey === sy)
-                                break;
-                            var cand = outs[key(ex, ey)];
-                            if (!cand)
-                                break;
-                            var dinx = ex - cx, diny = ey - cy;
-                            var best = null, bestTurn = -1;
-                            for (var j = 0; j < cand.length; ++j) {
-                                var e = cand[j];
-                                if (e.used)
-                                    continue;
-                                var dox = e.x2 - ex, doy = e.y2 - ey;
-                                var turn = Math.atan2(dinx * doy - diny * dox, dinx * dox + diny * doy);
-                                if (turn <= 0)
-                                    turn += Math.PI * 2;
-                                if (turn > bestTurn) { bestTurn = turn; best = e; }
-                            }
-                            if (!best)
-                                break;
-                            best.used = true;
-                            cx = ex; cy = ey;
-                            ex = best.x2; ey = best.y2;
-                        }
-                        // Only a loop that made it back to where it started is
-                        // a real outline. A dead-ended walk would be closed by
-                        // a straight line across the shape, which is the stray
-                        // diagonal that flashes through the grid.
-                        if (pts.length > 3 && ex === sx && ey === sy)
-                            loops.push(pts);
-                    }
-                    return loops;
-                }
-
-                // One loop -> a path with every corner rounded. The radius is
-                // clamped to half of the shorter neighbouring side so short
-                // edges never fold over themselves.
-                function addLoop(ctx, pts, rad) {
-                    var n = pts.length;
-                    if (n > 1 && pts[n - 1][0] === pts[0][0] && pts[n - 1][1] === pts[0][1])
-                        n -= 1;
-                    if (n < 3)
-                        return;
-                    ctx.moveTo((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2);
-                    for (var i = 1; i <= n; ++i) {
-                        var p = pts[i % n];
-                        var prev = pts[i - 1];
-                        var next = pts[(i + 1) % n];
-                        var l1 = Math.sqrt(Math.pow(p[0] - prev[0], 2) + Math.pow(p[1] - prev[1], 2));
-                        var l2 = Math.sqrt(Math.pow(next[0] - p[0], 2) + Math.pow(next[1] - p[1], 2));
-                        ctx.arcTo(p[0], p[1], next[0], next[1], Math.max(0, Math.min(rad, l1 / 2, l2 / 2)));
-                    }
-                    ctx.closePath();
-                }
             }
 
             // Empty / error / loading states.
@@ -814,7 +747,9 @@ Item {
                     }
                 }
                 displaced: Transition {
-                    enabled: theme.animate
+                    // Reflowing cells while zooming/resizing makes the
+                    // selection canvas lag behind their animated positions.
+                    enabled: theme.animate && !pane.gridGeometryChanging
                     NumberAnimation { properties: "x,y"; duration: 240; easing.type: Easing.OutCubic }
                 }
 
@@ -837,17 +772,7 @@ Item {
                     z: 200
                     acceptedButtons: Qt.NoButton
                     onWheel: function(wheel) {
-                        wheel.accepted = pane.handleZoomWheel(wheel);
-                    }
-                }
-
-                WheelHandler {
-                    target: null
-                    acceptedModifiers: Qt.NoModifier
-                    onWheel: function(event) {
-                        var step = 80 * pane.zoom;
-                        var maxY = Math.max(0, gridView.contentHeight - gridView.height);
-                        gridView.contentY = Math.max(0, Math.min(maxY, gridView.contentY - (event.angleDelta.y > 0 ? step : -step)));
+                        wheel.accepted = pane.handleWheel(wheel, gridView);
                     }
                 }
 
@@ -893,8 +818,10 @@ Item {
                                 var idx = r * c + cc;
                                 if (idx >= paneEngine.item_count)
                                     break;
-                                var l = cc * cw + 4, t = r * ch + 4;
-                                if (x < l + cw - 8 && x + w > l && y < t + ch - 8 && y + h > t)
+                                var inset = pane.gridCellGap / 2;
+                                var l = cc * cw + inset, t = r * ch + inset;
+                                if (x < l + cw - pane.gridCellGap && x + w > l
+                                        && y < t + ch - pane.gridCellGap && y + h > t)
                                     sel[paneEngine.path_at(idx)] = true;
                             }
                         }
@@ -999,6 +926,7 @@ Item {
                     DropArea {
                         id: folderDrop
                         anchors.fill: parent
+                        anchors.margins: pane.gridCellGap / 2
                         enabled: card.is_dir && !paneEngine.read_only
                         keys: ["text/uri-list"]
                         onEntered: dragManager.hover(card.path, paneEngine)
@@ -1105,17 +1033,6 @@ Item {
                                     }
                                 }
 
-                                Rectangle {
-                                    x: thumbImg.x + (thumbImg.width - thumbImg.paintedWidth) / 2
-                                    y: thumbImg.y + (thumbImg.height - thumbImg.paintedHeight) / 2
-                                    width: thumbImg.paintedWidth
-                                    height: thumbImg.paintedHeight
-                                    radius: Math.min(theme.radiusM, width / 2, height / 2)
-                                    color: "transparent"
-                                    border.color: card.isSelected ? theme.primary : theme.outlineVariant
-                                    border.width: 1
-                                    opacity: card.isSelected ? 0.75 : 0.35
-                                }
                             }
                             Rectangle {
                                 visible: card.is_symlink
@@ -1174,6 +1091,7 @@ Item {
                     MouseArea {
                         id: cardMouse
                         anchors.fill: parent
+                        anchors.margins: pane.gridCellGap / 2
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
@@ -1318,7 +1236,7 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                spacing: 3
+                spacing: 8
                 clip: true
                 cacheBuffer: theme.lowPower ? 0 : 400
                 boundsBehavior: Flickable.StopAtBounds
@@ -1354,7 +1272,25 @@ Item {
                     z: 200
                     acceptedButtons: Qt.NoButton
                     onWheel: function(wheel) {
-                        wheel.accepted = pane.handleZoomWheel(wheel);
+                        wheel.accepted = pane.handleWheel(wheel, listView);
+                    }
+                }
+                MouseArea {
+                    parent: listView.contentItem
+                    z: -1
+                    x: 0
+                    y: 0
+                    width: listView.width
+                    height: Math.max(listView.height + listView.contentY, listView.contentHeight)
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onPressed: { pane.activated(); window.defocusInputs(); }
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            var pt = mapToItem(window.contentItem, mouse.x, mouse.y);
+                            window.openEmptyMenu(pane, pt.x, pt.y);
+                        } else {
+                            pane.clearSelection();
+                        }
                     }
                 }
                 footer: Item {

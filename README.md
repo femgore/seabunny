@@ -3,8 +3,10 @@
 a file manager. for managing files. groundbreaking stuff.
 
 this branch is **seabunny 0.2.0**, rebuilt on the newer upstream architecture.
-the installed 0.1 build can stay put while this one gets tested.
-[what changed and how to try it](NEXT-VERSION.md).
+the installed explorer and portal now use the matching 0.2.0 build. the previous
+versioned payloads are still around, because sometimes the old thing working is
+useful information. [what changed and how to try it](NEXT-VERSION.md), or the
+[changelog](CHANGELOG.md) if you just want the list.
 
 i wanted my folders to look nice and stuff so that became a rust + qt/qml project.
 there are tabs. there are thumbnails. the sidebar remembers where i left it.
@@ -72,8 +74,10 @@ try the development file picker separately with `fish ./test-file-picker.fish`.
 that opens five test dialogs on a private bus. no installing, no changing your
 current picker, no desktop renovation bullshit. `--case save` runs just Save As.
 
-there isn't a published release or AUR package yet, so you'll need to build from
-source. the Nix recipe is here too, but it hasn't been verified for this snapshot.
+there isn't a tagged release or published AUR package yet, so you'll need to
+build from source. the AUR packaging draft is included; it needs the v0.2.0 tag
+to exist before its source can be fetched. the Nix recipe is here too, but it
+hasn't been verified for this snapshot.
 its presence in the repo is not a spiritual guarantee that it works.
 if you try it and it falls on its ass, the details would actually be useful.
 
