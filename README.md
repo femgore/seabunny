@@ -2,10 +2,10 @@
 
 a file manager. for managing files. groundbreaking stuff.
 
-this branch is **seabunny 0.2.0**, rebuilt on the newer upstream architecture.
+this branch is **seabunny 0.2.0**, rebuilt on newer architecture.
 the installed explorer and portal now use the matching 0.2.0 build. the previous
 versioned payloads are still around, because sometimes the old thing working is
-useful information. [what changed and how to try it](NEXT-VERSION.md), or the
+useful information, or the
 [changelog](CHANGELOG.md) if you just want the list.
 
 i wanted my folders to look nice and stuff so that became a rust + qt/qml project.
@@ -137,7 +137,6 @@ the new UI checks use temporary profiles. the Wayland clipboard check uses a
 private virtual KWin session, because borrowing your actual clipboard for a test
 would be annoying as hell. KWin and QtTest are test dependencies, not app requirements.
 the older 0.1 UI harnesses are kept for reference; use `tests/next` for this branch.
-[more test details and remaining limits](NEXT-VERSION.md).
 
 it's still early. archive editing isn't supported. upstream's optional SMB and
 sharing features are present, but haven't been tested against a real server here.
@@ -150,4 +149,4 @@ there's a decent chance the thing annoying you also annoys the shit out of me.
 
 [third-party notices and license status](NOTICE.md).
 
-anyway. that's seabunny. it opens folders and i have opinions about the spacing.
+anyway. that's seabunny. it opens folders and looks pretty.
