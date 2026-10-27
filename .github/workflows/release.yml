@@ -101,12 +101,14 @@ jobs:
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage -O linuxdeploy-plugin-qt
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt
           export PATH="$GITHUB_WORKSPACE:$PATH"
+          APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy.AppImage --list-plugins
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
           cp target/release/seabunny AppDir/usr/bin/
           cp packaging/seabunny/org.femgore.Seabunny.desktop AppDir/usr/share/applications/
           cp packaging/seabunny/org.femgore.Seabunny.svg AppDir/usr/share/icons/hicolor/scalable/apps/
           cp packaging/seabunny/org.femgore.Seabunny.svg AppDir/org.femgore.Seabunny.svg
-          QML_SOURCES_PATHS="$GITHUB_WORKSPACE/qml" \
+          QMAKE=/usr/bin/qmake6 \
+            QML_SOURCES_PATHS="$GITHUB_WORKSPACE/qml" \
             EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so" \
             LINUXDEPLOY_OUTPUT_VERSION="$VERSION" \
             LDAI_OUTPUT="Seabunny-${VERSION}-x86_64.AppImage" \

@@ -28,14 +28,9 @@ optdepends=(
 source=("git+https://github.com/femgore/seabunny.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
-prepare() {
-  cd "$srcdir/seabunny"
-  cargo fetch --locked
-}
-
 build() {
   cd "$srcdir/seabunny"
-  cargo build --release --locked --offline
+  cargo build --release --locked
 }
 
 package() {
