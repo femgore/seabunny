@@ -604,6 +604,7 @@ enum UndoAction {
     Trash { items: Vec<TrashItem> },
     Merge { actions: Vec<UndoAction> },
     RemovedDirectory { path: String, mode: u32 },
+    CreatedMergeDirectory { path: String, mode: u32 },
 }
 
 static UNDO_STACK: Mutex<Option<Vec<UndoAction>>> = Mutex::new(None);
@@ -1252,6 +1253,18 @@ fn transfer_merge_entry(src: &Path, dst: &Path, cut: bool, actions: &mut Vec<Und
         actions.push(UndoAction::Move { pairs });
         return Ok(());
     }
+    if cut && real_directory(src) {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(src).map_err(|e| e.to_string())?.permissions().mode();
+        fs::create_dir(dst).map_err(|e| e.to_string())?;
+        actions.push(UndoAction::CreatedMergeDirectory { path: dst.to_string_lossy().into_owned(), mode });
+        fs::set_permissions(dst, fs::Permissions::from_mode(mode | 0o700)).map_err(|e| e.to_string())?;
+        // Move children separately and remove only empty source directories.
+        // A recursive delete after copying can lose source files on partial failure.
+        let result = merge_folder_contents(src, dst, true, &HashMap::new(), actions);
+        let permissions = fs::set_permissions(dst, fs::Permissions::from_mode(mode)).map_err(|e| e.to_string());
+        return result.and(permissions);
+    }
     let copied = copy_merge_entry(src, dst);
     if copied && cut && remove_path(src) {
         actions.push(UndoAction::Move { pairs });
@@ -1386,6 +1399,12 @@ fn trash_via_cli(path: &Path) -> Option<TrashItem> {
 fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
     match action {
         UndoAction::Merge { actions } => {
+            use std::os::unix::fs::PermissionsExt;
+            for action in actions {
+                if let UndoAction::CreatedMergeDirectory { path, mode } = action {
+                    if real_directory(Path::new(path)) { let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode | 0o700)); }
+                }
+            }
             let mut undone = actions.iter().rev().filter_map(|action| {
                 match action {
                     UndoAction::Move { .. } => replay_merge_move(action, true),
@@ -1395,10 +1414,14 @@ fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
             }).collect::<Vec<_>>();
             // Recreated source directories stay writable until their children
             // have returned, then regain their original permissions.
-            use std::os::unix::fs::PermissionsExt;
             for action in &undone {
                 if let UndoAction::RemovedDirectory { path, mode } = action {
                     let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode));
+                }
+            }
+            for action in actions {
+                if let UndoAction::CreatedMergeDirectory { path, mode } = action {
+                    if real_directory(Path::new(path)) { let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode)); }
                 }
             }
             undone.reverse();
@@ -1408,6 +1431,7 @@ fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
             use std::os::unix::fs::DirBuilderExt;
             fs::DirBuilder::new().mode(*mode | 0o700).create(path).ok().map(|_| action.clone())
         }
+        UndoAction::CreatedMergeDirectory { path, .. } => fs::remove_dir(path).ok().map(|_| action.clone()),
         UndoAction::Rename { dir, old_name, new_name } => {
             let base = Path::new(dir);
             fs::rename(base.join(new_name), base.join(old_name))
@@ -1491,9 +1515,21 @@ fn apply_action(action: &UndoAction) -> Option<UndoAction> {
                     _ => apply_action(action),
                 }
             }).collect::<Vec<_>>();
+            use std::os::unix::fs::PermissionsExt;
+            for action in &redone {
+                if let UndoAction::CreatedMergeDirectory { path, mode } = action {
+                    let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode));
+                }
+            }
             if redone.is_empty() { None } else { Some(UndoAction::Merge { actions: redone }) }
         }
         UndoAction::RemovedDirectory { path, .. } => fs::remove_dir(path).ok().map(|_| action.clone()),
+        UndoAction::CreatedMergeDirectory { path, mode } => {
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+            fs::DirBuilder::new().mode(*mode | 0o700).create(path).ok()?;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode | 0o700));
+            Some(action.clone())
+        }
         UndoAction::Rename { dir, old_name, new_name } => {
             let base = Path::new(dir);
             fs::rename(base.join(old_name), base.join(new_name))

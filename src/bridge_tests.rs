@@ -113,6 +113,29 @@ fn folder_merge_rejects_overlapping_paths_and_unresolved_collisions() {
 }
 
 #[test]
+fn failed_cut_directory_keeps_all_files_recoverable_when_undone() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 { return; } // root bypasses the permission failure under test
+    let fixture = Fixture::new();
+    let parent = fixture.0.join("read-only parent");
+    let source = parent.join("Folder/nested");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("preserve.txt"), "only original copy").unwrap();
+    let destination = fixture.0.join("new destination");
+    // The folder contents can be moved, but its original entry cannot be
+    // removed from the read-only parent when the fallback completes.
+    fs::set_permissions(source.parent().unwrap(), fs::Permissions::from_mode(0o500)).unwrap();
+    let mut actions = Vec::new();
+    let result = transfer_merge_entry(&source, &destination, true, &mut actions);
+    fs::set_permissions(source.parent().unwrap(), fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(result.is_err());
+    assert!(source.join("preserve.txt").exists() || destination.join("preserve.txt").exists());
+    apply_inverse(&UndoAction::Merge { actions }).unwrap();
+    assert_eq!(fs::read_to_string(source.join("preserve.txt")).unwrap(), "only original copy");
+    assert!(!destination.exists());
+}
+
+#[test]
 fn archive_and_application_icons_agree_across_icon_sources() {
     for name in ["a.rar", "a.RAR", "a.7z", "a.tar.gz", "a.tgz", "a.cab", "a.iso", "a.zip"] {
         let path = Path::new(name);
