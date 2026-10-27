@@ -64,7 +64,15 @@ jobs:
       - name: Build Arch package
         run: |
           set -euo pipefail
-          su builder -c "cd '$GITHUB_WORKSPACE/packaging/aur' && makepkg --syncdeps --noconfirm --cleanbuild"
+          if su builder -c "cd '$GITHUB_WORKSPACE/packaging/aur' && makepkg --syncdeps --noconfirm --cleanbuild" > /tmp/seabunny-makepkg.log 2>&1; then
+            cat /tmp/seabunny-makepkg.log
+          else
+            result=$?
+            tail -n 25 /tmp/seabunny-makepkg.log | while IFS= read -r line; do
+              echo "::error title=makepkg diagnostic::$line"
+            done
+            exit "$result"
+          fi
       - name: Collect Arch package
         run: |
           set -euo pipefail
@@ -112,7 +120,16 @@ jobs:
             EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so" \
             LINUXDEPLOY_OUTPUT_VERSION="$VERSION" \
             LDAI_OUTPUT="Seabunny-${VERSION}-x86_64.AppImage" \
-            APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage
+            APPIMAGE_EXTRACT_AND_RUN=1 DEBUG=1 \
+            ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage \
+            > /tmp/seabunny-appimage.log 2>&1 || {
+              result=$?
+              tail -n 25 /tmp/seabunny-appimage.log | while IFS= read -r line; do
+                echo "::error title=AppImage diagnostic::$line"
+              done
+              exit "$result"
+            }
+          cat /tmp/seabunny-appimage.log
           mkdir -p dist
           mv "Seabunny-${VERSION}-x86_64.AppImage" dist/
       - uses: actions/upload-artifact@v4
