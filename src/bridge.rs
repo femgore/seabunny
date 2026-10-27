@@ -10,6 +10,8 @@ pub mod qobject {
         fn thumbnail_statistics() -> QString;
         include!("seabunny/src/app_integration.h");
         fn configure_seabunny();
+        fn seabunny_clipboard_files() -> QString;
+        fn seabunny_set_clipboard_files(paths: &QString, cut: bool);
         include!("seabunny/src/open_with.h");
         fn seabunny_open_with_apps(paths: &QString) -> QString;
         fn seabunny_open_with(paths: &QString, desktop_id: &QString, make_default: bool) -> QString;
@@ -183,7 +185,10 @@ pub mod qobject {
         fn check_paste_conflicts(self: &SeabunnyEngine, paths_json: &QString, dest_dir: &QString) -> QString;
 
         #[qinvokable]
-        fn check_clipboard_conflicts(self: &SeabunnyEngine, dest_dir: &QString) -> QString;
+        fn check_clipboard_conflicts(self: Pin<&mut SeabunnyEngine>, dest_dir: &QString) -> QString;
+
+        #[qinvokable]
+        fn cancel_pending_paste(self: Pin<&mut SeabunnyEngine>);
 
         #[qinvokable]
         fn check_merge_conflicts(self: &SeabunnyEngine, paths_json: &QString, dest_dir: &QString) -> QString;
@@ -268,7 +273,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[path = "bridge_tests.rs"]
 mod regression_tests;
 
-static CLIPBOARD: Mutex<(Vec<String>, bool)> = Mutex::new((Vec::new(), false));
+fn clipboard_files() -> (Vec<String>, bool) {
+    let (mut paths, cut): (Vec<String>, bool) = serde_json::from_str(&qobject::seabunny_clipboard_files().to_string()).unwrap_or_default();
+    paths.retain(|path| crate::archive::parse(path).map(|(archive, _)| archive.is_file())
+        .unwrap_or_else(|| Path::new(path).is_absolute() && entry_exists(Path::new(path))));
+    (paths, cut)
+}
 static VISIT_COUNTS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 static SETTINGS_STORE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 static BIN_CACHE: Mutex<Option<HashMap<String, Option<String>>>> = Mutex::new(None);
@@ -539,6 +549,7 @@ pub struct SeabunnyEngineRust {
     forward_stack: Vec<String>,
     scan_generation: Arc<AtomicU64>,
     scan_requests: Option<Arc<DirectoryInbox>>,
+    pending_paste: Option<(Vec<String>, bool)>,
 }
 
 struct DirectoryRequest {
@@ -2520,6 +2531,7 @@ impl Default for SeabunnyEngineRust {
             folder_position: QString::from("mixed"),
             view_mode: QString::from("grid"),
             clipboard_cut_paths_json: QString::from("[]"),
+            pending_paste: None,
             device_type: QString::from(detect_device_type()),
             can_undo: false,
             can_redo: false,
@@ -2723,20 +2735,9 @@ impl qobject::SeabunnyEngine {
 
     /// Drops clipboard paths that no longer exist and republishes the state.
     fn refresh_clipboard_state(mut self: Pin<&mut Self>) {
-        let (has, json) = {
-            let mut clip = CLIPBOARD.lock().unwrap();
-            clip.0.retain(|p| crate::archive::parse(p).map(|(path, _)| path.is_file()).unwrap_or_else(|| Path::new(p).exists()));
-            let has = !clip.0.is_empty();
-            if !has {
-                clip.1 = false;
-            }
-            let json = if clip.1 && has {
-                serde_json::to_string(&clip.0).unwrap_or_else(|_| "[]".to_string())
-            } else {
-                "[]".to_string()
-            };
-            (has, json)
-        };
+        let (paths, cut) = clipboard_files();
+        let has = !paths.is_empty();
+        let json = if cut { serde_json::to_string(&paths).unwrap_or_else(|_| "[]".into()) } else { "[]".into() };
         self.as_mut().set_has_clipboard(has);
         self.as_mut().set_clipboard_cut_paths_json(QString::from(&json));
     }
@@ -3131,15 +3132,9 @@ impl qobject::SeabunnyEngine {
         let archive_source = serde_json::from_str::<Vec<String>>(&paths_json.to_string()).unwrap_or_default().iter().any(|path| path.starts_with(crate::archive::PREFIX));
         let is_cut = is_cut && !archive_source;
         if let Ok(paths) = serde_json::from_str::<Vec<String>>(&paths_json.to_string()) {
-            let mut clip = CLIPBOARD.lock().unwrap();
-            *clip = (paths.clone(), is_cut);
-            let has = !clip.0.is_empty();
-            self.as_mut().set_has_clipboard(has);
-            if is_cut {
-                self.as_mut().set_clipboard_cut_paths_json(paths_json.clone());
-            } else {
-                self.as_mut().set_clipboard_cut_paths_json(QString::from("[]"));
-            }
+            qobject::seabunny_set_clipboard_files(paths_json, is_cut);
+            self.as_mut().set_has_clipboard(!paths.is_empty());
+            self.as_mut().set_clipboard_cut_paths_json(if is_cut { paths_json.clone() } else { QString::from("[]") });
         }
     }
 
@@ -3246,11 +3241,17 @@ impl qobject::SeabunnyEngine {
         QString::from(&serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".to_string()))
     }
 
-    pub fn check_clipboard_conflicts(&self, dest_dir: &QString) -> QString {
-        let clip = CLIPBOARD.lock().unwrap();
-        let paths_json = serde_json::to_string(&clip.0).unwrap_or_else(|_| "[]".to_string());
-        drop(clip);
+    pub fn check_clipboard_conflicts(mut self: Pin<&mut Self>, dest_dir: &QString) -> QString {
+        let selection = clipboard_files();
+        let paths_json = serde_json::to_string(&selection.0).unwrap_or_else(|_| "[]".to_string());
+        // Keep the selection the user actually started pasting, even if another
+        // process replaces the system clipboard while the conflict dialog is up.
+        self.as_mut().rust_mut().pending_paste = Some(selection);
         self.check_paste_conflicts(&QString::from(&paths_json), dest_dir)
+    }
+
+    pub fn cancel_pending_paste(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().pending_paste = None;
     }
 
     pub fn check_merge_conflicts(&self, paths_json: &QString, dest_dir: &QString) -> QString {
@@ -3268,17 +3269,14 @@ impl qobject::SeabunnyEngine {
     }
 
     pub fn check_clipboard_merge_conflicts(&self, dest_dir: &QString) -> QString {
-        let paths = CLIPBOARD.lock().unwrap().0.clone();
+        let paths = self.pending_paste.clone().unwrap_or_else(clipboard_files).0;
         self.check_merge_conflicts(&QString::from(&serde_json::to_string(&paths).unwrap_or_else(|_| "[]".into())), dest_dir)
     }
 
     pub fn paste_items_resolved(mut self: Pin<&mut Self>, dest_dir: &QString, resolution: &QString) {
         if self.as_mut().reject_archive_write(&dest_dir.to_string()) { return; }
         let dest = PathBuf::from(dest_dir.to_string());
-        let (files, is_cut) = {
-            let clip = CLIPBOARD.lock().unwrap();
-            (clip.0.clone(), clip.1)
-        };
+        let (files, is_cut) = self.as_mut().rust_mut().pending_paste.take().unwrap_or_else(clipboard_files);
         if self.as_mut().copy_archive_paths(&files, &dest_dir.to_string()) { return; }
         let (res, merge_choices) = merge_resolution(&resolution.to_string());
 
@@ -3291,6 +3289,13 @@ impl qobject::SeabunnyEngine {
         for src_str in &files {
             let src = PathBuf::from(src_str);
             let Some(file_name) = src.file_name().and_then(|n| n.to_str()) else { continue };
+            let same_folder = src.parent().and_then(|parent| fs::canonicalize(parent).ok())
+                .zip(fs::canonicalize(&dest).ok()).is_some_and(|(parent, destination)| parent == destination);
+            if same_folder && is_cut { continue; }
+            if real_directory(&src) && fs::canonicalize(&src).ok().zip(fs::canonicalize(&dest).ok())
+                .is_some_and(|(source, destination)| destination.starts_with(source)) {
+                merge_errors.push("Cannot paste a folder into itself or its subfolders.".into()); continue;
+            }
             let original_target = dest.join(file_name);
             if res == "merge" && real_directory(&src) && real_directory(&original_target) {
                 match merge_folders(&src, &original_target, is_cut, &merge_choices, &mut merged_actions) {
@@ -3299,7 +3304,9 @@ impl qobject::SeabunnyEngine {
                 }
                 continue;
             }
-            let target = if res == "merge" && entry_exists(&original_target) {
+            let target = if same_folder {
+                get_unique_name(&dest, file_name)
+            } else if res == "merge" && entry_exists(&original_target) {
                 match resolve_merge_collision(&src, &original_target, &merge_choices, &mut merged_actions) {
                     Ok(Some(target)) => target,
                     Ok(None) => continue,
@@ -3342,6 +3349,7 @@ impl qobject::SeabunnyEngine {
             };
 
             if !ok {
+                merge_errors.push(format!("Could not paste {} into {}.", src.display(), dest.display()));
                 continue;
             }
             let target_str = target.to_string_lossy().to_string();
@@ -3356,13 +3364,13 @@ impl qobject::SeabunnyEngine {
         }
 
         if is_cut {
-            let remaining = if let Ok(mut clip) = CLIPBOARD.lock() {
-                clip.0.retain(|path| !completed_cuts.contains(path));
-                clip.1 = !clip.0.is_empty();
-                clip.0.clone()
-            } else { files.clone() };
-            self.as_mut().set_clipboard_cut_paths_json(QString::from(&serde_json::to_string(&remaining).unwrap_or_else(|_| "[]".into())));
-            self.as_mut().set_has_clipboard(!remaining.is_empty());
+            let remaining: Vec<_> = files.iter().filter(|path| !completed_cuts.contains(path)).cloned().collect();
+            // Do not replace a newer selection if its owner changed during I/O.
+            let current: (Vec<String>, bool) = serde_json::from_str(&qobject::seabunny_clipboard_files().to_string()).unwrap_or_default();
+            if current == (files.clone(), true) {
+                qobject::seabunny_set_clipboard_files(&QString::from(&serde_json::to_string(&remaining).unwrap_or_else(|_| "[]".into())), true);
+            }
+            self.as_mut().refresh_clipboard_state();
         }
 
         if !merged_actions.is_empty() {

@@ -48,3 +48,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME open-with COMMAND ${Python3_EXECUTABLE} -B
     ${CMAKE_CURRENT_SOURCE_DIR}/run_open_with_checks.py --native-only
     --native-binary $<TARGET_FILE:open-with-tests>)
+
+qt_add_executable(clipboard-tests tst_clipboard.cpp ../src/app_integration.cpp)
+target_include_directories(clipboard-tests PRIVATE ../src)
+target_link_libraries(clipboard-tests PRIVATE Qt6::Gui Qt6::Test)
+add_test(NAME clipboard COMMAND ${Python3_EXECUTABLE} -B
+    ${CMAKE_CURRENT_SOURCE_DIR}/run_clipboard_checks.py --native-binary $<TARGET_FILE:clipboard-tests>)

@@ -514,6 +514,8 @@ ApplicationWindow {
     readonly property bool fileActionsReady: window.gridKeyboardReady && !window.chooserMode
         && !engine.archive_path.length && engine.current_path !== engine.trash_root
 
+    onActiveChanged: if (active && !chooserMode) engine.sync_shared_state()
+
     // Global Keyboard Shortcuts. Each is *enabled* only when it should apply so
     // that a disabled shortcut never swallows the key from a focused text field.
     Shortcut { sequence: "Ctrl+Z"; enabled: !window.chooserMode && window.gridKeyboardReady && engine.can_undo; onActivated: engine.undo() }
@@ -4721,6 +4723,7 @@ ApplicationWindow {
 
         function showEmptyMenu(mx, my) {
             if (window.chooserMode) return;
+            engine.sync_shared_state();
             currentTargetItem = null;
             isItemMenu = false;
             model = buildEmptyModel();
@@ -5463,6 +5466,7 @@ ApplicationWindow {
         property int mergeIndex: 0
         property var mergeChoices: ({})
         property string mergeError: ""
+        onClosed: if (!isDrop) engine.cancel_pending_paste()
 
         function showForClipboard(confList, dest) {
             resolvingMerge = false;

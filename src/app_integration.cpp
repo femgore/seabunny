@@ -11,6 +11,8 @@
 #include <QSaveFile>
 #include <QRegularExpression>
 #include <QUrl>
+#include <QClipboard>
+#include <QMimeData>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -63,6 +65,65 @@ QString seabunny_startup_arguments() {
         if (!path.isEmpty()) result.append(QFileInfo(path).absoluteFilePath());
     }
     return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+// Use the window-system clipboard so separate processes and other file managers
+// see the same selection. Never interpret plain clipboard text as file paths.
+QString seabunny_clipboard_files() {
+    QJsonArray paths;
+    bool cut = false;
+    const QMimeData *mime = QGuiApplication::clipboard()->mimeData();
+    if (mime) {
+        QList<QUrl> urls;
+        if (mime->hasFormat("x-special/gnome-copied-files")) {
+            auto lines = mime->data("x-special/gnome-copied-files").split('\n');
+            const auto action = lines.isEmpty() ? QByteArray() : lines.takeFirst().trimmed();
+            if (action == "copy" || action == "cut") {
+                cut = action == "cut";
+                for (const auto &line : lines) if (!line.trimmed().isEmpty()) urls.append(QUrl::fromEncoded(line.trimmed()));
+            }
+        } else {
+            urls = mime->urls();
+            cut = mime->data("application/x-kde-cutselection") == "1";
+        }
+        for (const auto &url : urls) {
+            if (url.isValid() && url.isLocalFile() && (url.host().isEmpty() || url.host() == "localhost")) {
+                const auto path = url.toLocalFile();
+                if (QDir::isAbsolutePath(path) && !paths.contains(path)) paths.append(path);
+            }
+        }
+        // Archive entries are virtual locations, not local files to hand to
+        // another application's text/uri-list handler.
+        if (paths.isEmpty() && mime->hasFormat("application/x-seabunny-archive-files")) {
+            const auto entries = QJsonDocument::fromJson(mime->data("application/x-seabunny-archive-files")).array();
+            for (const auto &entry : entries)
+                if (entry.isString() && entry.toString().startsWith("seabunny-archive:")) paths.append(entry);
+            cut = false;
+        }
+    }
+    return QString::fromUtf8(QJsonDocument(QJsonArray{paths, cut}).toJson(QJsonDocument::Compact));
+}
+
+void seabunny_set_clipboard_files(const QString &pathsJson, bool cut) {
+    const auto paths = QJsonDocument::fromJson(pathsJson.toUtf8()).array();
+    if (paths.isEmpty()) { QGuiApplication::clipboard()->clear(); return; }
+    auto *mime = new QMimeData;
+    QList<QUrl> urls;
+    QJsonArray archives;
+    for (const auto &entry : paths) {
+        const auto path = entry.toString();
+        if (path.startsWith("seabunny-archive:")) archives.append(path);
+        else if (QDir::isAbsolutePath(path)) urls.append(QUrl::fromLocalFile(path));
+    }
+    if (!urls.isEmpty()) {
+        mime->setUrls(urls);
+        QByteArray gnome = cut ? "cut" : "copy";
+        for (const auto &url : urls) gnome += '\n' + url.toEncoded();
+        mime->setData("x-special/gnome-copied-files", gnome);
+        mime->setData("application/x-kde-cutselection", cut ? "1" : "0");
+    }
+    if (!archives.isEmpty()) mime->setData("application/x-seabunny-archive-files", QJsonDocument(archives).toJson(QJsonDocument::Compact));
+    QGuiApplication::clipboard()->setMimeData(mime);
 }
 
 namespace {
