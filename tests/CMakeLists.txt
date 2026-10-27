@@ -38,3 +38,13 @@ qt_add_executable(portal-tests tst_portal.cpp ../src/portal_backend.h ../src/por
 target_include_directories(portal-tests PRIVATE ../src)
 target_link_libraries(portal-tests PRIVATE Qt6::Quick Qt6::Test Qt6::DBus KF6::WindowSystem)
 add_test(NAME portal COMMAND portal-tests)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-unix-2.0)
+qt_add_executable(open-with-tests tst_open_with.cpp ../src/open_with.h ../src/open_with.cpp)
+target_include_directories(open-with-tests PRIVATE ../src)
+target_link_libraries(open-with-tests PRIVATE Qt6::Core Qt6::Test PkgConfig::GIO)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME open-with COMMAND ${Python3_EXECUTABLE} -B
+    ${CMAKE_CURRENT_SOURCE_DIR}/run_open_with_checks.py --native-only
+    --native-binary $<TARGET_FILE:open-with-tests>)

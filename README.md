@@ -31,6 +31,8 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 - trash, restore, copy/paste, drag and drop, and undo/redo for when you do some stupid shit
 - read-only archive browsing and extraction
 - file permissions in properties, including a make executable switch. no terminal detour
+- open with lets you pick an app and save it as the default for that file type
+- executable programs and AppImages actually run instead of getting dumped into your browser
 - built-in palettes, light/dark modes, reduced motion, and optional live Serpantinum colors
 - a matching file picker for apps using desktop portals. yes, i got distracted by that too
 
@@ -41,7 +43,7 @@ the rest are in [HOTKEYS.md](HOTKEYS.md). there's a table. very official.
 
 the dependency list got a little long. you'll need rust/cargo, a c++ compiler,
 cmake, ninja, pkg-config, qt 6 (base, declarative/quick, svg, and wayland), and
-KDE Frameworks 6 WindowSystem.
+KDE Frameworks 6 WindowSystem, and GLib/GIO development files (`gio-unix-2.0`).
 
 python 3 and libarchive handle archives. ffmpeg adds video thumbnails. zip and 7z
 are used for the compression formats that need them.

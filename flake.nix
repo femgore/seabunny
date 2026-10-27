@@ -35,6 +35,7 @@
             qtEnv
             pkgs.libGL
             pkgs.kdePackages.kwindowsystem
+            pkgs.glib
             pkgs.python3
             pkgs.libarchive
             pkgs.p7zip
@@ -69,6 +70,7 @@
             qtEnv
             pkgs.libGL
             pkgs.kdePackages.kwindowsystem
+            pkgs.glib
             pkgs.python3
             pkgs.libarchive
             pkgs.p7zip

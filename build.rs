@@ -1,6 +1,17 @@
 use cxx_qt_build::{CxxQtBuilder, QmlModule};
 
 fn main() {
+    let gio_flags = std::process::Command::new("pkg-config")
+        .args(["--cflags", "gio-unix-2.0"]).output().expect("pkg-config is required");
+    assert!(gio_flags.status.success(), "GLib/GIO development files are required for Open With");
+    let gio_libs = std::process::Command::new("pkg-config")
+        .args(["--libs", "gio-unix-2.0"]).output().expect("pkg-config is required");
+    assert!(gio_libs.status.success());
+    for flag in String::from_utf8_lossy(&gio_libs.stdout).split_whitespace() {
+        if let Some(name) = flag.strip_prefix("-l") { println!("cargo:rustc-link-lib={name}"); }
+        else if let Some(path) = flag.strip_prefix("-L") { println!("cargo:rustc-link-search={path}"); }
+        else { println!("cargo:rustc-link-arg={flag}"); }
+    }
     let kf_include = std::process::Command::new("pkg-config")
         .args(["--variable=includedir", "KF6WindowSystem"]).output().expect("pkg-config is required");
     assert!(kf_include.status.success(), "KF6WindowSystem development files are required for portal parenting");
@@ -43,9 +54,14 @@ fn main() {
     .cpp_file("src/icon_provider.cpp")
     .cpp_file("src/app_integration.h")
     .cpp_file("src/app_integration.cpp")
+    .cpp_file("src/open_with.h")
+    .cpp_file("src/open_with.cpp")
     .cpp_file("src/portal_backend.h")
     .cpp_file("src/portal_backend.cpp")
-    .cc_builder(|cc| { cc.include(String::from_utf8_lossy(&kf_include.stdout).trim()); })
+    .cc_builder(|cc| {
+        cc.include(String::from_utf8_lossy(&kf_include.stdout).trim());
+        for flag in String::from_utf8_lossy(&gio_flags.stdout).split_whitespace() { cc.flag(flag); }
+    })
     .qt_module("DBus")
     .qt_module("Quick")
     .build(); }

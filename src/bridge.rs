@@ -10,6 +10,10 @@ pub mod qobject {
         fn thumbnail_statistics() -> QString;
         include!("seabunny/src/app_integration.h");
         fn configure_seabunny();
+        include!("seabunny/src/open_with.h");
+        fn seabunny_open_with_apps(paths: &QString) -> QString;
+        fn seabunny_open_with(paths: &QString, desktop_id: &QString, make_default: bool) -> QString;
+        fn seabunny_open_file(path: &QString) -> QString;
         include!("seabunny/src/portal_backend.h");
         fn start_seabunny_portal() -> bool;
         fn seabunny_portal_mode() -> bool;
@@ -120,6 +124,12 @@ pub mod qobject {
 
         #[qinvokable]
         fn open_item(self: Pin<&mut SeabunnyEngine>, path: &QString);
+
+        #[qinvokable]
+        fn open_with_apps(&self, paths: &QString) -> QString;
+
+        #[qinvokable]
+        fn open_with(self: Pin<&mut SeabunnyEngine>, paths: &QString, desktop_id: &QString, make_default: bool) -> QString;
 
         #[qinvokable]
         fn valid_location(self: &SeabunnyEngine, path: &QString) -> bool;
@@ -2809,6 +2819,13 @@ impl qobject::SeabunnyEngine {
 
     pub fn thumbnail_stats(&self) -> QString { qobject::thumbnail_statistics() }
 
+    pub fn open_with_apps(&self, paths: &QString) -> QString { qobject::seabunny_open_with_apps(paths) }
+
+    pub fn open_with(self: Pin<&mut Self>, paths: &QString, desktop_id: &QString, make_default: bool) -> QString {
+        if qobject::seabunny_portal_mode() { return QString::from("Applications cannot be launched from the file picker."); }
+        qobject::seabunny_open_with(paths, desktop_id, make_default)
+    }
+
     pub fn open_item(mut self: Pin<&mut Self>, path: &QString) {
         let value = path.to_string();
         if let Some((archive, member)) = crate::archive::parse(&value) {
@@ -2823,7 +2840,8 @@ impl qobject::SeabunnyEngine {
         } else if crate::archive::supported(Path::new(&value)) && Path::new(&value).is_file() {
             self.set_path(path);
         } else {
-            let _ = std::process::Command::new("xdg-open").arg(&value).spawn();
+            let error = qobject::seabunny_open_file(path);
+            self.as_mut().set_navigation_error(error);
         }
     }
 

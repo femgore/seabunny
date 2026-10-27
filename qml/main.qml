@@ -501,7 +501,7 @@ ApplicationWindow {
     readonly property bool listShowType: width >= 980
 
     // True while any modal dialog is open (arrow keys / shortcuts must not fire).
-    readonly property bool anyModalOpen: inputModal.visible || favoritePrompt.visible || propsModal.visible
+    readonly property bool anyModalOpen: inputModal.visible || favoritePrompt.visible || propsModal.visible || openWithModal.visible
         || conflictModal.visible || passwordModal.visible || chooserOverwrite.visible || window.isEditingPath
 
     // True when a plain keystroke should be routed to the grid/list (no input
@@ -4609,6 +4609,10 @@ ApplicationWindow {
                 }
             } });
 
+            if (!inTrash) m.push({ text: "Open With…", icon: "squares-four", action: function() {
+                openWithModal.showFor(paths);
+            } });
+
             if ((it.is_dir || engine.is_archive_file(itemPath)) && !inTrash) m.push({text: "Open in New Tab", icon: "folder-open", action: function() { window.openFolderTab(itemPath, false); }});
 
             // Hide "Open Containing Folder" when the item already lives in the
@@ -4828,6 +4832,183 @@ ApplicationWindow {
                 engine.create_file(engine.current_path, val);
             } else if (mode === "rename") {
                 engine.rename_item(targetDirectory, targetItemName, val);
+            }
+        }
+    }
+
+    // ==========================================
+    // OPEN WITH
+    // ==========================================
+    SeabunnyDialog {
+        id: openWithModal
+        title: "Open With"
+        dialogWidth: Math.min(460, window.width - 32)
+        property var paths: []
+        property var applications: []
+        property var details: ({})
+        property string selectedApp: ""
+        property string error: ""
+        readonly property var filteredApps: applications.filter(function(app) {
+            return app.name.toLowerCase().includes(applicationSearch.text.toLowerCase());
+        })
+
+        function showFor(items) {
+            if (window.chooserMode || !items.length) return;
+            paths = items.slice();
+            details = JSON.parse(engine.open_with_apps(JSON.stringify(paths)) || "{}");
+            applications = details.apps || [];
+            error = details.error || "";
+            applicationSearch.text = "";
+            defaultApplication.checked = false;
+            selectedApp = applications.length ? applications[0].id : "";
+            open();
+            applicationSearch.forceActiveFocus();
+        }
+
+        function launch() {
+            if (!selectedApp.length) return;
+            error = engine.open_with(JSON.stringify(paths), selectedApp,
+                                     details.canSetDefault && defaultApplication.checked);
+            if (!error.length) close();
+        }
+
+        Text {
+            text: openWithModal.paths.length === 1 ? openWithModal.paths[0].split("/").pop()
+                : openWithModal.paths.length + " selected items"
+            color: theme.textMuted
+            font.pixelSize: 12
+            elide: Text.ElideMiddle
+            Layout.fillWidth: true
+        }
+        TextField {
+            id: applicationSearch
+            objectName: "applicationSearch"
+            Layout.fillWidth: true
+            placeholderText: "Search applications"
+            color: theme.textMain
+            placeholderTextColor: theme.textMuted
+            selectByMouse: true
+            onTextChanged: {
+                var needle = text.toLowerCase();
+                var matches = openWithModal.applications.filter(function(app) { return app.name.toLowerCase().includes(needle); });
+                openWithModal.selectedApp = matches.length ? matches[0].id : "";
+            }
+            Keys.onDownPressed: {
+                if (applicationList.count) {
+                    applicationList.currentIndex = 0;
+                    openWithModal.selectedApp = openWithModal.filteredApps[0].id;
+                    applicationList.forceActiveFocus();
+                }
+            }
+            onAccepted: openWithModal.launch()
+            background: Rectangle {
+                implicitHeight: 36
+                color: theme.surfaceContainer
+                radius: theme.radiusM
+                border.color: applicationSearch.activeFocus ? theme.primary : theme.outline
+            }
+        }
+        ListView {
+            id: applicationList
+            objectName: "applicationList"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(260, window.height * 0.36)
+            clip: true
+            spacing: 2
+            model: openWithModal.filteredApps
+            onCurrentIndexChanged: {
+                if (activeFocus && currentIndex >= 0 && currentIndex < count)
+                    openWithModal.selectedApp = openWithModal.filteredApps[currentIndex].id;
+            }
+            Keys.onReturnPressed: openWithModal.launch()
+            Keys.onEnterPressed: openWithModal.launch()
+            ScrollBar.vertical: ScrollBar {}
+            delegate: ItemDelegate {
+                required property var modelData
+                width: ListView.view.width
+                height: 50
+                onClicked: openWithModal.selectedApp = modelData.id
+                contentItem: RowLayout {
+                    spacing: 12
+                    Image {
+                        source: modelData.icon.startsWith("file:") ? modelData.icon : theme.resolveIcon(modelData.icon)
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
+                        sourceSize: Qt.size(28, 28)
+                        fillMode: Image.PreserveAspectFit
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: modelData.name
+                            color: theme.textMain
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            visible: modelData.isDefault || modelData.recommended
+                            text: modelData.isDefault ? "Default application" : "Recommended"
+                            color: theme.textMuted
+                            font.pixelSize: 10
+                        }
+                    }
+                    SeabunnyIcon {
+                        name: "check"
+                        visible: openWithModal.selectedApp === modelData.id
+                        color: theme.primary
+                        size: 18
+                    }
+                }
+                background: Rectangle {
+                    radius: theme.radiusM
+                    color: openWithModal.selectedApp === parent.modelData.id ? theme.primaryContainer
+                        : parent.hovered || parent.activeFocus ? theme.surfaceContainerHighest : "transparent"
+                }
+            }
+            Text {
+                anchors.centerIn: parent
+                visible: applicationList.count === 0
+                text: "No applications found"
+                color: theme.textMuted
+                font.pixelSize: 12
+            }
+        }
+        SeabunnySwitch {
+            id: defaultApplication
+            objectName: "defaultApplicationSwitch"
+            enabled: !!openWithModal.details.canSetDefault
+            opacity: enabled ? 1 : 0.5
+            label: "Use by default for this file type"
+        }
+        Text {
+            text: openWithModal.details.canSetDefault
+                ? "File type: " + (openWithModal.details.typeName || openWithModal.details.mimeType)
+                : openWithModal.details.defaultNote || "Select items of one file type to set a default."
+            color: theme.textMuted
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Text {
+            visible: text.length > 0
+            text: openWithModal.error
+            color: theme.danger
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            SeabunnyButton { text: "Cancel"; onClicked: openWithModal.close() }
+            SeabunnyButton {
+                objectName: "openWithButton"
+                text: "Open"
+                variant: "filled"
+                enabled: openWithModal.selectedApp.length > 0
+                onClicked: openWithModal.launch()
             }
         }
     }
