@@ -26,9 +26,12 @@ def main():
         for name in ("home", "config", "data", "cache", "state"):
             (fixture / name).mkdir(mode=0o700)
         desktop_state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+        desktop_config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+        desktop_data = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
         env = dict(os.environ, HOME=str(fixture / "home"), XDG_CONFIG_HOME=str(fixture / "config"),
             XDG_DATA_HOME=str(fixture / "data"), XDG_CACHE_HOME=str(fixture / "cache"), XDG_STATE_HOME=str(fixture / "state"),
-            SEABUNNY_DESKTOP_STATE_HOME=str(desktop_state), SEABUNNY_DEVELOPMENT_PORTAL_TEST=str(fixture),
+            SEABUNNY_DESKTOP_STATE_HOME=str(desktop_state), SEABUNNY_DESKTOP_CONFIG_HOME=str(desktop_config),
+            SEABUNNY_DESKTOP_DATA_HOME=str(desktop_data), SEABUNNY_DEVELOPMENT_PORTAL_TEST=str(fixture),
             GSETTINGS_BACKEND="memory")
         # Preserve the desktop's palette path without copying application settings.
         if not any(env.get(key) for key in ("SEABUNNY_SERPANTINUM_COLORS", "QS_COLORS_JSON", "QS_STATE_DIR")):

@@ -5,6 +5,7 @@
 #include <QIcon>
 #include <QDir>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPainter>
@@ -17,23 +18,52 @@
 #include <QQmlProperty>
 
 namespace {
+QString validIconTheme(QString value) {
+    value = value.trimmed();
+    if (value.size() >= 2 && value.startsWith('\'') && value.endsWith('\''))
+        value = value.mid(1, value.size() - 2);
+    if (value.isEmpty() || value.contains('/') || value.contains('\n'))
+        return {};
+    return value;
+}
+
+QString gtkIconTheme() {
+    QString configHome = qEnvironmentVariable("SEABUNNY_DESKTOP_CONFIG_HOME");
+    if (configHome.isEmpty())
+        configHome = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    for (const QString &toolkit : {QStringLiteral("gtk-4.0"), QStringLiteral("gtk-3.0")}) {
+        QSettings settings(QDir(configHome).filePath(toolkit + QStringLiteral("/settings.ini")), QSettings::IniFormat);
+        const QString theme = validIconTheme(settings.value(QStringLiteral("Settings/gtk-icon-theme-name")).toString());
+        if (!theme.isEmpty())
+            return theme;
+    }
+    return {};
+}
+
 class IconProvider : public QQuickImageProvider {
 public:
     IconProvider() : QQuickImageProvider(QQuickImageProvider::Image), systemTheme(QIcon::themeName()) {
         searchPaths = QIcon::themeSearchPaths();
         for (const auto &root : QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation))
             searchPaths.append(root + "/icons");
+        const QString desktopDataHome = qEnvironmentVariable("SEABUNNY_DESKTOP_DATA_HOME");
+        if (!desktopDataHome.isEmpty())
+            searchPaths.append(QDir(desktopDataHome).filePath("icons"));
         searchPaths.append(QDir::homePath() + "/.icons");
         searchPaths.removeDuplicates();
-        QProcess settings;
-        settings.start("gsettings", {"get", "org.gnome.desktop.interface", "icon-theme"});
-        if (settings.waitForFinished(500) && settings.exitCode() == 0) {
-            QString value = QString::fromUtf8(settings.readAllStandardOutput()).trimmed();
-            if (value.startsWith('\'') && value.endsWith('\'')) value = value.mid(1, value.size() - 2);
-            if (!value.isEmpty() && !value.contains('/') && !value.contains('\n')) systemTheme = value;
-        } else if (settings.state() != QProcess::NotRunning) {
-            settings.kill();
-            settings.waitForFinished(500);
+        const QString gtkTheme = gtkIconTheme();
+        if (!gtkTheme.isEmpty()) {
+            systemTheme = gtkTheme;
+        } else {
+            QProcess settings;
+            settings.start("gsettings", {"get", "org.gnome.desktop.interface", "icon-theme"});
+            if (settings.waitForFinished(500) && settings.exitCode() == 0) {
+                const QString value = validIconTheme(QString::fromUtf8(settings.readAllStandardOutput()));
+                if (!value.isEmpty()) systemTheme = value;
+            } else if (settings.state() != QProcess::NotRunning) {
+                settings.kill();
+                settings.waitForFinished(500);
+            }
         }
     }
 
