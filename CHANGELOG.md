@@ -6,8 +6,8 @@ right to. in roughly that order.
 ## 0.2.0
 
 this is the upstream-based rebuild. it keeps the features that made seabunny
-seabunny, and borrows the newer file model and background-job plumbing from
-[Loaf](https://github.com/m-uvex/loaf-fm). one browser now serves both the normal
+seabunny, and implements newer file model and background plumbing.
+one browser now serves both the normal
 file manager and the portal picker. maintaining two almost-identical browsers
 would have been an extremely dumb hobby.
 
@@ -21,12 +21,11 @@ would have been an extremely dumb hobby.
 - added the standalone XDG portal backend for open, save, multiple-save, and
   folder selection, with filters, cancellation, suggested names, and overwrite
   confirmation
-- fixed a few upstream copy and thumbnail-lifecycle footguns while moving the
-  feature set over
+- fixed a few thumbnail-lifecycle footguns during the rewrite
 - fixed zoom reflow and selection hitboxes so the highlight follows the actual
-  item instead of hovering over the empty space next to it
+  item instead of hovering over the empty space next to it (how did i even fuck this up)
 
-the app and portal both report 0.2.0. the portal remains opt-in: installing its
+the portal remains opt-in: installing its
 backend doesn't change which portal handles FileChooser, and it doesn't touch
 screen sharing or the rest of your desktop setup.
 
