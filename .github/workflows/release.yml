@@ -47,15 +47,27 @@ jobs:
     container: archlinux:base-devel
     steps:
       - uses: actions/checkout@v4
-      - name: Build Arch package
+      - name: Install Arch build dependencies
         run: |
           set -euo pipefail
           pacman -Syu --noconfirm --needed git rust cargo cmake ninja pkgconf qt6-base qt6-declarative qt6-svg qt6-wayland kwindowsystem glib2 python libarchive 7zip zip
+      - name: Set Arch package version
+        run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+      - name: Prepare package builder
+        run: |
+          set -euo pipefail
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Build Arch package
+        run: |
+          set -euo pipefail
           su builder -c "cd '$GITHUB_WORKSPACE/packaging/aur' && makepkg --syncdeps --noconfirm --cleanbuild"
+      - name: Collect Arch package
+        run: |
+          set -euo pipefail
           mkdir -p dist
           cp packaging/aur/*.pkg.tar.zst dist/
       - uses: actions/upload-artifact@v4
@@ -86,8 +98,9 @@ jobs:
           test "$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "seabunny"))')" = "$VERSION"
           cargo build --release --locked
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage -O linuxdeploy.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage -O linuxdeploy-plugin-qt.AppImage
-          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage -O linuxdeploy-plugin-qt
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt
+          export PATH="$GITHUB_WORKSPACE:$PATH"
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
           cp target/release/seabunny AppDir/usr/bin/
           cp packaging/seabunny/org.femgore.Seabunny.desktop AppDir/usr/share/applications/
