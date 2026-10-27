@@ -29,6 +29,7 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 
 - grid and list views, tabs, split view, recursive search, and the keyboard shortcuts your hands already know
 - background file operations with progress and cancellation, batch rename, and quick look
+- large previews, square grid cells, and ctrl+scroll zoom from compact to properly big
 - image and video thumbnails. the videos don't start playing every time you scroll past them
 - a sidebar you can resize and rearrange, with bookmarks and saved open/closed state
 - per-folder sorting. only folders with custom sorting need a saved entry
@@ -40,7 +41,8 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 - file permissions in properties, including a make executable switch. no terminal detour
 - open with lets you pick an app and save it as the default for that file type
 - executable programs and AppImages actually run instead of getting dumped into your browser
-- built-in palettes, light/dark modes, reduced motion, and optional live Serpantinum colors
+- automatic live Serpantinum colors, built-in palettes, light/dark modes, and reduced motion
+- Phosphor, Serpantinum Symbols, system icons, and Adwaita, all in the normal settings
 - a matching file picker for apps using desktop portals. yes, i got distracted by that too
 
 f2 renames. delete sends things to trash. ctrl+shift+n makes a folder. f5 refreshes.
@@ -66,6 +68,9 @@ folder paths, archives, and local file urls all work as arguments.
 
 for a separate development profile, use `fish ./run-development.fish` after building.
 it opens a new window without changing your installed app or portal routing.
+try the development file picker separately with `fish ./test-file-picker.fish`.
+that opens five test dialogs on a private bus. no installing, no changing your
+current picker, no desktop renovation bullshit. `--case save` runs just Save As.
 
 there isn't a published release or AUR package yet, so you'll need to build from
 source. the Nix recipe is here too, but it hasn't been verified for this snapshot.

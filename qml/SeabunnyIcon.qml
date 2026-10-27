@@ -39,7 +39,16 @@ Item {
     readonly property bool isDuotone: !usesSymbols && (typeof theme !== "undefined" && theme.phosphorWeight === "duotone")
     readonly property string fontFamily: usesSymbols ? theme.symbolsFontFamily : (typeof theme !== "undefined" && theme.getFontFamily) ? theme.getFontFamily() : "Phosphor"
 
+    Loader {
+        anchors.centerIn: parent
+        active: iconRoot.name === "seabunny-logo"
+        sourceComponent: Component {
+            SeabunnyLogo { size: iconRoot.size; color: iconRoot.color }
+        }
+    }
+
     Text {
+        visible: iconRoot.name !== "seabunny-logo"
         anchors.centerIn: parent
         text: iconRoot.primaryGlyph
         font.family: iconRoot.fontFamily
@@ -51,7 +60,7 @@ Item {
     }
 
     Loader {
-        active: iconRoot.isDuotone
+        active: iconRoot.isDuotone && iconRoot.name !== "seabunny-logo"
         anchors.centerIn: parent
         sourceComponent: duotoneOverlay
     }

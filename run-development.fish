@@ -10,7 +10,12 @@ end
 for directory in config data cache state
     mkdir -p -- "$seabunny_profile/$directory"; or exit 1
 end
-env XDG_CONFIG_HOME="$seabunny_profile/config" \
+set --local seabunny_desktop_state "$HOME/.local/state"
+if set -q XDG_STATE_HOME; and test -n "$XDG_STATE_HOME"
+    set seabunny_desktop_state "$XDG_STATE_HOME"
+end
+env SEABUNNY_DESKTOP_STATE_HOME="$seabunny_desktop_state" \
+    XDG_CONFIG_HOME="$seabunny_profile/config" \
     XDG_DATA_HOME="$seabunny_profile/data" \
     XDG_CACHE_HOME="$seabunny_profile/cache" \
     XDG_STATE_HOME="$seabunny_profile/state" \

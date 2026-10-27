@@ -23,8 +23,8 @@ Item {
     }
 
     readonly property bool card1Match: matchesQuery("theme appearance light dark auto mode color scheme")
-    readonly property bool card2Match: matchesQuery("theme palette accent colors wallpaper catppuccin nord tokyonight gruvbox rosepine amber lavender violet ricing")
-    readonly property bool card4Match: matchesQuery("icon style vector phosphor system adwaita desktop theme")
+    readonly property bool card2Match: matchesQuery("theme palette accent colors wallpaper automatic serpantinum catppuccin nord tokyonight gruvbox rosepine amber lavender violet ricing")
+    readonly property bool card4Match: matchesQuery("icon style vector phosphor system adwaita desktop theme serpantinum symbols nerd")
     readonly property bool card5Match: matchesQuery("phosphor weight variant thin light regular bold fill duotone stroke thickness")
 
     readonly property bool card6Match: matchesQuery("left click drag action selection box pan scroll view rubberband marquee mouse")
@@ -32,7 +32,7 @@ Item {
     readonly property bool card8Match: matchesQuery("show hidden files dot dotfiles folders")
     readonly property bool card9Match: matchesQuery("disambiguate duplicate names parent folder prefix search")
 
-    readonly property bool card10Match: matchesQuery("experimental icon styles adwaita advanced archives compress cpio tar formats")
+    readonly property bool card10Match: matchesQuery("experimental advanced archives compress cpio tar formats")
     readonly property bool card11Match: matchesQuery("about seabunny version musa orbitos author credits")
     readonly property bool card12Match: matchesQuery("experimental pc customization dashboard layout sections this pc")
     readonly property bool card13Match: matchesQuery("performance low power mode battery old slow computer animations effects gpu")
@@ -147,11 +147,12 @@ Item {
                                 tabs.push({ id: "share", name: "Share", iconName: "share-network" });
                             }
                             tabs.push({ id: "network", name: "Network", iconName: "network" });
-                            tabs.push({ id: "about", name: "About Seabunny", iconName: "bread" });
+                            tabs.push({ id: "about", name: "About Seabunny", iconName: "seabunny-logo" });
                             return tabs;
                         }
 
                         delegate: Item {
+                            objectName: "settingsTab_" + modelData.id
                             width: tabNavList.width
                             height: tabNavList.rowHeight
                             y: index * (tabNavList.rowHeight + tabNavList.rowGap)
@@ -471,6 +472,16 @@ Item {
                                     spacing: 2
                                     Text { text: qsTr("Color palette"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true }
                                     Text { text: qsTr("Wallpaper extraction & community color schemes"); color: theme.textMuted; font.pixelSize: theme.fs(11) }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: theme.accentName === "auto" || theme.accentName === "serpantinum"
+                                        text: theme.accentName === "auto" && !theme.followsSerpantinum
+                                            ? qsTr("Automatic: using wallpaper colors until a Serpantinum palette is available.")
+                                            : theme.serpantinumStatus
+                                        color: theme.textMuted
+                                        font.pixelSize: theme.fs(11)
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
 
                                 Flow {
@@ -479,6 +490,7 @@ Item {
 
                                     Repeater {
                                         model: [
+                                            { id: "auto", label: qsTr("Automatic") },
                                             { id: "serpantinum", label: qsTr("Serpantinum (Live)") },
                                             { id: "wallpaper", label: qsTr("Wallpaper") },
                                             { id: "lavender", label: qsTr("Seabunny Violet") },
@@ -493,7 +505,8 @@ Item {
                                         delegate: Item {
                                             width: 126; height: 38
 
-                                            readonly property var swatch: theme.palettes[modelData.id] ? theme.palettes[modelData.id] : theme.palettes["lavender"]
+                                            readonly property var swatch: (modelData.id === "auto" || modelData.id === "serpantinum") && theme.serpantinumPalette
+                                                ? theme.serpantinumPalette : (theme.palettes[modelData.id] || theme.palettes["wallpaper"])
 
                                             Rectangle {
                                                 anchors.fill: parent
@@ -540,7 +553,7 @@ Item {
                             }
                         }
                         Rectangle {
-                            visible: theme.showExperimentalIcons && (settingsView.searchQuery.length === 0 || settingsView.card4Match)
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card4Match
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             implicitHeight: iconSrcRow.implicitHeight + 32
@@ -558,7 +571,7 @@ Item {
                                     spacing: 3
                                     Layout.fillWidth: true
                                     Text { text: qsTr("Icon style"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                                    Text { text: qsTr("Phosphor, system theme, or GNOME Adwaita"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Phosphor, Serpantinum Symbols, system theme, or GNOME Adwaita"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
 
@@ -567,49 +580,16 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 8
 
-                                    Item {
-                                        width: 90; height: 38
-                                        Rectangle {
-                                            anchors.fill: parent; radius: theme.radiusFull
-                                            color: theme.iconSource === "phosphor" ? theme.primaryContainer : theme.surfaceContainerHigh
-                                            border.width: theme.iconSource === "phosphor" ? 2 : 1
-                                            border.color: theme.iconSource === "phosphor" ? theme.primary : theme.outlineVariant
-                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
-                                            Text { anchors.centerIn: parent; text: qsTr("Phosphor"); color: theme.iconSource === "phosphor" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
+                                    Repeater {
+                                        model: [{key:"phosphor",title:qsTr("Phosphor")},
+                                            {key:"serpantinum",title:qsTr("Serpantinum Symbols")},
+                                            {key:"system",title:qsTr("System")}, {key:"adwaita",title:qsTr("Adwaita")}]
+                                        delegate: SeabunnyButton {
+                                            objectName: "iconStyle_" + modelData.key
+                                            text: modelData.title
+                                            variant: theme.iconSource === modelData.key ? "tonal" : "outlined"
+                                            onClicked: theme.iconSource = modelData.key
                                         }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "phosphor" }
-                                    }
-
-                                    Item {
-                                        width: 90; height: 38
-                                        Rectangle {
-                                            anchors.fill: parent; radius: theme.radiusFull
-                                            color: theme.iconSource === "system" ? theme.primaryContainer : theme.surfaceContainerHigh
-                                            border.width: theme.iconSource === "system" ? 2 : 1
-                                            border.color: theme.iconSource === "system" ? theme.primary : theme.outlineVariant
-                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
-                                            Text { anchors.centerIn: parent; text: qsTr("System"); color: theme.iconSource === "system" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
-                                        }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "system" }
-                                    }
-
-                                    Item {
-                                        width: 90; height: 38
-                                        Rectangle {
-                                            anchors.fill: parent; radius: theme.radiusFull
-                                            color: theme.iconSource === "adwaita" ? theme.primaryContainer : theme.surfaceContainerHigh
-                                            border.width: theme.iconSource === "adwaita" ? 2 : 1
-                                            border.color: theme.iconSource === "adwaita" ? theme.primary : theme.outlineVariant
-                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
-                                            Text { anchors.centerIn: parent; text: qsTr("Adwaita"); color: theme.iconSource === "adwaita" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
-                                        }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "adwaita" }
                                     }
                                 }
                             }
@@ -1014,45 +994,6 @@ Item {
                         Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         transform: Translate { y: tabExperimental.slideOffset }
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            implicitHeight: expIconRow.implicitHeight + 32
-                            radius: theme.radiusL
-                            color: theme.surfaceContainer
-                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
-
-                            GridLayout {
-                                id: expIconRow
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                columnSpacing: 14
-                                rowSpacing: 10
-                                columns: (width - 14 - expIconSwitch.implicitWidth) >= 170 ? 2 : 1
-
-                                ColumnLayout {
-                                    spacing: 3
-                                    Layout.fillWidth: true
-                                    Text { text: qsTr("More icon styles"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                                    Text { text: qsTr("Enable System desktop theme and GNOME Adwaita vector icons"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                                }
-
-                                SeabunnySwitch {
-                                    id: expIconSwitch
-                                    Layout.alignment: Qt.AlignRight
-                                    checked: theme.showExperimentalIcons
-                                    onToggled: theme.showExperimentalIcons = checked
-                                }
-                            }
-
-                            Connections {
-                                target: theme
-                                function onShowExperimentalIconsChanged() {
-                                    if (expIconSwitch.checked !== theme.showExperimentalIcons)
-                                        expIconSwitch.checked = theme.showExperimentalIcons
-                                }
-                            }
-                        }
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0

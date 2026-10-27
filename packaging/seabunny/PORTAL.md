@@ -78,6 +78,22 @@ filename. it keeps Chromium's sandbox enabled. this doesn't test actual Niri
 window behavior or prove that a browser download finishes writing. headless tests
 are useful, but they don't have a secret pair of eyes on your desktop.
 
+## try the development picker first
+
+from a built checkout, this needs no registration or service restart:
+
+```fish
+fish ./test-file-picker.fish
+fish ./test-file-picker.fish --case save
+```
+
+it starts this checkout's backend on a private bus, then opens sample Open,
+multiple-file, folder, Save As and SaveFiles dialogs. accept or cancel each to
+continue. it uses a disposable profile and never changes your active portal
+preferences. press ctrl+c to stop. test files and a backend log are retained under
+`target/` if something acts up. the existing manual test below is for a registered
+backend; this helper is for the development build. different jobs, less guessing.
+
 ## make a package
 
 ```fish

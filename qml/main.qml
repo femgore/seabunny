@@ -250,7 +250,7 @@ ApplicationWindow {
     }
 
     function systemIcon(name) {
-        return core.resolve_icon(theme.iconSource === "adwaita" ? "adwaita" : "system", name);
+        return theme.resolveIcon(name);
     }
 
     function urlsToPaths(urls) {
@@ -744,7 +744,7 @@ ApplicationWindow {
         var restored = restoreSession(pending.length > 0);
         if (native.startupMode === "mini") {
             sidebar.expanded = false;
-            theme.zoomIndex = 1;
+            theme.gridItemSize = 146;
         }
         var first = !restored;
         for (var i = 0; i < pending.length; ++i) {
@@ -819,9 +819,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+N"; enabled: !window.anyModalOpen; onActivated: window.startNewFolder() }
     Shortcut { sequence: "F3"; onActivated: window.toggleSplit() }
     Shortcut { sequence: "F9"; onActivated: sidebar.expanded = !sidebar.expanded }
-    Shortcut { sequences: ["Ctrl+=", "Ctrl++", StandardKey.ZoomIn]; onActivated: theme.stepZoom(1) }
-    Shortcut { sequences: ["Ctrl+-", StandardKey.ZoomOut]; onActivated: theme.stepZoom(-1) }
-    Shortcut { sequence: "Ctrl+0"; onActivated: theme.zoomIndex = 2 }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++", StandardKey.ZoomIn]; onActivated: window.activePane.zoomFiles(1) }
+    Shortcut { sequences: ["Ctrl+-", StandardKey.ZoomOut]; onActivated: window.activePane.zoomFiles(-1) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: theme.resetZoom() }
     Shortcut { sequence: "Ctrl+1"; onActivated: engine.set_view("grid") }
     Shortcut { sequence: "Ctrl+2"; onActivated: engine.set_view("list") }
     Shortcut { sequence: "Ctrl+D"; enabled: engine.location_kind === "dir"; onActivated: core.add_bookmark(engine.current_path) }
@@ -1225,7 +1225,7 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 spacing: 6
                                 SeabunnyIcon {
-                                    visible: crumbDelegate.modelData.is_root_place && theme.iconSource === "phosphor"
+                                    visible: crumbDelegate.modelData.is_root_place && theme.usesGlyphIcons
                                     name: crumbDelegate.modelData.icon || "folder"
                                     size: 15
                                     color: chip.isCurrent ? theme.secondaryContainerFg : theme.textMain
@@ -1556,7 +1556,6 @@ ApplicationWindow {
                 id: sidebar
                 Layout.fillHeight: true
                 Layout.preferredWidth: implicitWidth
-                Behavior on Layout.preferredWidth { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.35 } }
                 activeId: {
                     if (window.activeView === "settings")
                         return "settings";
@@ -1912,7 +1911,7 @@ ApplicationWindow {
             color: tibMouse.containsMouse ? theme.hoverOverlay : "transparent"
         }
         SeabunnyIcon {
-            visible: theme.iconSource === "phosphor" || tib.systemIcon.length === 0
+            visible: theme.usesGlyphIcons || tib.systemIcon.length === 0
             anchors.centerIn: parent
             name: tib.iconName
             size: tib.small ? 12 : 18
@@ -2227,11 +2226,11 @@ ApplicationWindow {
                 pane.engine.set_path(item.parent_path);
                 pane.pendingSelect = [target];
             } });
+        if (!inArchive) {
+            m.push({ text: qsTr("Open With…"), icon: "app-window", itemKey: "open_with", action: function() { openWithModal.showFor(paths); } });
+        }
         if (!item.is_dir && !inArchive) {
             var openData = openWithData(paths);
-            var openSub = openWithMenu(paths, openData);
-            if (openSub.length > 0)
-                m.push({ text: qsTr("Open With…"), icon: "app-window", itemKey: "open_with", action: function() { openWithModal.showFor(paths); } });
             var defSub = setDefaultMenu(paths, openData);
             if (defSub.length > 0)
                 m.push({ text: qsTr("Set Default Application"), icon: "check-square", itemKey: "set_default", submenu: defSub });
@@ -2695,9 +2694,9 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.leftMargin: 8; Layout.rightMargin: 8
             Text { text: qsTr("Icon size"); color: theme.textMain; font.pixelSize: theme.fs(12); Layout.fillWidth: true }
-            SeabunnyButton { icon: "magnifying-glass-minus"; variant: "tonal"; enabled: theme.zoomIndex > 0; onClicked: theme.stepZoom(-1) }
+            SeabunnyButton { icon: "magnifying-glass-minus"; variant: "tonal"; enabled: theme.gridItemSize > 88; onClicked: window.activePane.zoomFiles(-1) }
             Text { text: Math.round(theme.zoom * 100) + "%"; color: theme.textMuted; font.pixelSize: theme.fs(11) }
-            SeabunnyButton { icon: "magnifying-glass-plus"; variant: "tonal"; enabled: theme.zoomIndex < theme.zoomLevels.length - 1; onClicked: theme.stepZoom(1) }
+            SeabunnyButton { icon: "magnifying-glass-plus"; variant: "tonal"; enabled: theme.gridItemSize < 420; onClicked: window.activePane.zoomFiles(1) }
         }
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.topMargin: 4; Layout.bottomMargin: 4; color: theme.separator }
         Text { Layout.leftMargin: 8; text: qsTr("SORT BY"); color: theme.textMuted; font.pixelSize: theme.fs(10); font.bold: true; font.letterSpacing: 0.8 }

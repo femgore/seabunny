@@ -9,6 +9,22 @@ background jobs, split panes, batch rename, recursive search and quick look.
 we aren't making a second file browser just for the picker. both windows use the
 same pane, sidebar and theme components.
 
+## appearance parity fixes
+
+automatic colors now discover the desktop palette even when the development
+launcher isolates the app's state directory. explicit palette paths and manually
+chosen color schemes still win. nested light/dark wallpaper exports are preserved.
+
+the 0.1 grid is back: 220-pixel nominal cells by default, an 88–420 range, large
+previews, and column-by-column ctrl+scroll zoom. ctrl+plus / ctrl+minus and the view controls
+use the same sizing; ctrl+0 resets it. all four icon styles are visible without an
+experimental toggle. the settings About entry uses the rabbit too. finally.
+
+Open With is a direct right-click action for files and folders. sidebar dragging
+now updates its width directly, with the expand/collapse animation kept separate.
+software rendering uses a plain thumbnail instead of a GPU-only mask, even when
+low-power mode is manually disabled. loaded-but-invisible previews are not useful.
+
 ## the stuff brought back
 
 - Seabunny branding, icons, live Serpantinum colors and the compact save-name field
@@ -41,6 +57,19 @@ app. it can browse and operate on your real files when you launch it, so the usu
 file-manager rules still apply. the launcher doesn't install anything, claim the
 normal running-instance service, or change default apps or portal configuration.
 close the development window to go back to using the installed version.
+
+to try the development picker without registering or enabling anything:
+
+```fish
+fish ./test-file-picker.fish
+fish ./test-file-picker.fish --case save
+```
+
+accept or cancel each sample dialog. the helper runs this checkout's backend on
+its own private bus with a disposable profile. close the terminal or press ctrl+c
+to stop it. sample files and the backend log stay under `target/portal-development-*`
+and `target/portal-live-test-*`. the chooser doesn't write the selected outputs.
+
 
 building a package also doesn't install it:
 
@@ -99,7 +128,7 @@ without touching your desktop.
 ## verification for this development snapshot
 
 - release explorer and portal builds succeed
-- 72 Rust tests, 24 archive-reader tests, and 5 portal-installer tests pass
+- 73 Rust tests, 24 archive-reader tests, and 5 portal-installer tests pass
 - native Open With, portal controller/wire replies, and thumbnail lifecycle checks pass
 - the shared UI passes keyboard copy/paste, merge decisions and undo/redo,
   executable permissions, Open With, archive copying, chooser filters and modes,

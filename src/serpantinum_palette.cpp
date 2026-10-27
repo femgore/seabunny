@@ -16,12 +16,21 @@ SerpantinumPalette::SerpantinumPalette(QObject *parent)
         if (!state.isEmpty()) m_path = state + "/qs_colors.json";
     }
     if (m_path.isEmpty()) {
-        QString state = qEnvironmentVariable("XDG_STATE_HOME");
+        // A development profile has its own state directory, but still follows
+        // the desktop's read-only palette, without importing application settings.
+        QString state = qEnvironmentVariable("SEABUNNY_DESKTOP_STATE_HOME");
+        if (state.isEmpty()) state = qEnvironmentVariable("XDG_STATE_HOME");
         if (state.isEmpty()) state = QDir::homePath() + "/.local/state";
-        const QString linkedPalette = state + "/seabunny/serpantinum-colors.json";
-        const QFileInfo linkedInfo(linkedPalette);
-        m_path = linkedInfo.exists() || linkedInfo.isSymLink()
-            ? linkedPalette : state + "/serpantinum/qs_colors.json";
+        const QStringList candidates{
+            state + "/seabunny/serpantinum-colors.json",
+            state + "/serpantinum/qs_colors.json",
+            QDir::homePath() + "/serpantinum-migration/stock-session/state/qs_colors.json"
+        };
+        m_path = candidates[1];
+        for (const auto &candidate : candidates) {
+            const QFileInfo info(candidate);
+            if (info.exists() || info.isSymLink()) { m_path = candidate; break; }
+        }
     }
     m_path = QFileInfo(m_path).absoluteFilePath();
     m_debounce.setSingleShot(true);

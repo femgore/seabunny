@@ -1,4 +1,5 @@
 """Seabunny 0.2 acceptance checks. All settings, files and caches are disposable."""
+import argparse
 import struct
 import zlib
 import zipfile
@@ -10,6 +11,12 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--screenshots", type=Path, help="Save synthetic appearance screenshots here")
+args = parser.parse_args()
+if args.screenshots:
+    args.screenshots = args.screenshots.resolve()
+    args.screenshots.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="seabunny-next-checks-") as tmp:
     fixture = Path(tmp)
     for directory in ("home/work/destination", "config/seabunny", "data/applications", "state", "cache", "runtime"):
@@ -19,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="seabunny-next-checks-") as tmp:
     (home / "work/.hidden").write_text("hidden\n")
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
-    (home / "work/image.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00\xff")) + chunk(b"IEND", b""))
+    (home / "work/image.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 320, 240, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress((b"\x00" + b"\xff\x00\x00\xff" * 320) * 240)) + chunk(b"IEND", b""))
     (home / "work/program.AppImage").write_text("synthetic file, never executed\n")
     (home / "work/program.AppImage").chmod(0o640)
     for number in range(3):
@@ -41,17 +48,20 @@ with tempfile.TemporaryDirectory(prefix="seabunny-next-checks-") as tmp:
     (appdir / "mimeinfo.cache").write_text("[MIME Cache]\ntext/plain=test-viewer.desktop;org.femgore.Seabunny.desktop;\n")
     shutil.copytree(root / "qml", fixture / "qml")
     main = fixture / "qml/main.qml"
-    aliases = {"Core":"core", "Theme":"theme", "Sidebar":"sidebar", "Keys":"globalKeyHandler",
+    aliases = {"Menu":"contextMenu", "Settings":"settingsView", "Core":"core", "Theme":"theme", "Sidebar":"sidebar", "Keys":"globalKeyHandler",
         "Properties":"propsDialog", "OpenWith":"openWithModal", "Conflict":"conflictDialog",
         "Name":"chooserName", "Overwrite":"chooserOverwrite", "Input":"inputModal", "Batch":"batchRename", "Confirm":"confirmDialog", "Pattern":"patternModal", "Command":"commandModal"}
     source = main.read_text().replace('readonly property var chooser:', 'property var chooser:', 1)
     source = source.replace("    id: window\n", "    id: window\n" + "".join(
         f"    property alias test{name}: {target}\n" for name, target in aliases.items()), 1)
     main.write_text(source)
-    (fixture / "config/seabunny/config.json").write_text(json.dumps({"test_ui": str(main), "reduceMotion":"true"}))
+    (fixture / "config/seabunny/config.json").write_text(json.dumps({"test_ui": str(main), "reduceMotion":"true", "capture_dir":str(args.screenshots) if args.screenshots else ""}))
     (fixture / "config/seabunny/favorites.json").write_text(json.dumps([{"path":str(home / "work/destination"), "label":"Legacy favorite"}]))
     palette = {name:"#445566" for name in ("base", "mantle", "crust", "text", "subtext0", "subtext1", "surface0", "surface1", "surface2", "overlay0", "overlay1", "overlay2", "blue", "sapphire", "peach", "green", "red", "mauve", "pink", "yellow", "maroon", "teal")}
-    palette.update(base="#101010", text="#fafafa", blue="#abcdef")
+    palette.update(base="#101010", mantle="#181825", crust="#11111b", text="#fafafa", blue="#abcdef",
+        subtext0="#a6adc8", subtext1="#bac2de", surface0="#313244", surface1="#45475a", surface2="#585b70",
+        overlay0="#6c7086", overlay1="#7f849c", overlay2="#9399b2", green="#a6e3a1", red="#f38ba8",
+        peach="#fab387", sapphire="#74c7ec", mauve="#cba6f7", pink="#f5c2e7", yellow="#f9e2af", maroon="#eba0ac", teal="#94e2d5")
     palette_path = fixture / "palette.json"
     palette_path.write_text(json.dumps(palette))
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(fixture / "config"),
@@ -60,6 +70,15 @@ with tempfile.TemporaryDirectory(prefix="seabunny-next-checks-") as tmp:
         QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software", GSETTINGS_BACKEND="memory",
         QT_FORCE_STDERR_LOGGING="1", DISPLAY="", WAYLAND_DISPLAY="", DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent",
         SEABUNNY_SERPANTINUM_COLORS=str(palette_path), SEABUNNY_QML=str(root / "tests/next/NextChecks.qml"))
+    parity = subprocess.run([str(root / "target/release/seabunny"), "--new-window"],
+        env=dict(env, SEABUNNY_QML=str(root / "tests/next/AppearanceParity.qml")),
+        text=True, capture_output=True, timeout=45)
+    parity_output=parity.stdout + parity.stderr
+    print(parity_output)
+    assert parity.returncode == 0 and "APPEARANCE_PARITY_PASSED" in parity_output
+    if args.screenshots:
+        assert all((args.screenshots / (name+".png")).is_file() for name in ("grid", "settings"))
+    assert not any(error in parity_output for error in ("ReferenceError", "TypeError", "Binding loop", "Unable to assign"))
     process = subprocess.Popen([str(root / "target/release/seabunny"), "--new-window"],
         env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     lines = []

@@ -22,6 +22,7 @@ Rectangle {
     onExpandedWidthChanged: if (stateReady) sidebarSave.restart()
     Component.onCompleted: { stateChooser = window.chooserMode; stateReady = true; }
     Component.onDestruction: persistState()
+    readonly property bool resizing: resizeHandle.pressed
     // Id of the highlighted entry ("pc", "settings", "home", "bookmark:/x", ...).
     property string activeId: ""
 
@@ -52,12 +53,14 @@ Rectangle {
     color: theme.surfaceContainer
     clip: true
     implicitWidth: expanded ? Math.max(180, Math.min(expandedWidth, Math.min(520, window.width - 380))) : 68
-    Behavior on implicitWidth { enabled: theme.animate; NumberAnimation { duration: 230; easing.type: Easing.OutCubic } }
+    Behavior on implicitWidth { enabled: theme.animate && !rail.resizing; NumberAnimation { duration: 230; easing.type: Easing.OutCubic } }
 
     Accessible.role: Accessible.Pane
     Accessible.name: qsTr("Sidebar")
 
     MouseArea {
+        id: resizeHandle
+        objectName: "sidebarResizeHandle"
         anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
         width: 8; z: 20; visible: rail.expanded
         cursorShape: Qt.SplitHCursor
@@ -412,7 +415,7 @@ Rectangle {
             Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 4.5; damping: 0.3 } }
 
             SeabunnyIcon {
-                visible: theme.iconSource === "phosphor" || btn.systemIcon.length === 0
+                visible: theme.usesGlyphIcons || btn.systemIcon.length === 0
                 anchors.centerIn: parent
                 name: btn.iconName
                 size: 20

@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=["all", "open", "multiple", "folder", "save", "savefiles"], default="all")
     parser.add_argument("--frontend", action="store_true", help="Test the active public desktop portal instead of calling the backend directly")
+    parser.add_argument("--auto-cancel", action="store_true", help="Cancel each request automatically for a smoke test")
     args = parser.parse_args()
     repository = Path(__file__).resolve().parents[1]
     fixture = Path(tempfile.mkdtemp(prefix="portal-live-test-", dir=repository / "target"))
@@ -84,6 +85,19 @@ def main():
         bus.signal_subscribe(service, "org.freedesktop.portal.Request", "Response", None, None,
             Gio.DBusSignalFlags.NONE, frontend_response)
 
+    def cancel_case(expected_handle):
+        if state["handle"] != expected_handle:
+            return GLib.SOURCE_REMOVE
+        interface = "org.freedesktop.portal.Request" if args.frontend else "org.freedesktop.impl.portal.Request"
+        try:
+            bus.call_sync(service, expected_handle, interface, "Close", None, GLib.VariantType("()"),
+                Gio.DBusCallFlags.NONE, 10000, None)
+        except GLib.Error as error:
+            print("Cancellation failed: " + error.message, flush=True)
+            state["failed"] = True
+            loop.quit()
+        return GLib.SOURCE_REMOVE
+
     def next_case():
         index = state["index"]
         if index >= len(cases):
@@ -104,6 +118,8 @@ def main():
                     GLib.Variant("(ssa{sv})", ("", "Seabunny test — " + title, options)),
                     GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, 10000, None)
                 state["handle"] = reply.unpack()[0]
+                if args.auto_cancel:
+                    GLib.timeout_add(500, cancel_case, state["handle"])
             except GLib.Error as error:
                 print("Public portal request failed: " + error.message, flush=True)
                 state["failed"] = True
@@ -112,6 +128,8 @@ def main():
         bus.call(service, root, "org.freedesktop.impl.portal.FileChooser", method,
             GLib.Variant("(osssa{sv})", (state["handle"], "org.femgore.Seabunny.Test", "", "Seabunny test — " + title, options)),
             GLib.VariantType("(ua{sv})"), Gio.DBusCallFlags.NONE, 3600000, None, completed, label)
+        if args.auto_cancel:
+            GLib.timeout_add(500, cancel_case, state["handle"])
         return GLib.SOURCE_REMOVE
 
     print("Disposable files: " + str(fixture), flush=True)

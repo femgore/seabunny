@@ -27,6 +27,9 @@ fn dark_from_gsettings() -> Option<bool> {
 }
 
 fn dark_from_portal() -> Option<bool> {
+    // The backend must not activate (or wait on) the frontend that is currently
+    // activating it. Qt/GTK appearance and the live palette remain available.
+    if crate::integration::ffi::seabunny_portal_mode() { return None; }
     let out = run_cmd_stdout(
         "gdbus",
         &[
@@ -117,6 +120,12 @@ pub fn normalize_wallpaper_colors(content: &str) -> String {
     }
 
     if let Some(colors) = val.get("colors") {
+        // Matugen/Serpantinum exports named light/dark roles; only pywal's
+        // numbered terminal colors need the adapter below.
+        if colors.get("dark").is_some() || colors.get("light").is_some()
+            || colors.get("primary").is_some() {
+            return content.to_string();
+        }
         let special = val.get("special");
         let bg = special.and_then(|s| s.get("background")).and_then(|v| v.as_str())
             .or_else(|| colors.get("color0").and_then(|v| v.as_str()))
@@ -212,4 +221,21 @@ pub fn detect_device_type() -> &'static str {
         return "laptop";
     }
     "desktop"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn wallpaper_schemes_are_preserved_and_only_pywal_is_adapted() {
+        for content in [
+            r##"{"colors":{"dark":{"background":"#111122","primary":"#aabbcc"},"light":{"background":"#fafaff","primary":"#223355"}}}"##,
+            r##"{"colors":{"primary":{"dark":"#aabbcc","light":"#223355"},"background":{"dark":"#111122","light":"#fafaff"}}}"##,
+            r##"{"background":"#111122","primary":"#aabbcc"}"##,
+        ] { assert_eq!(normalize_wallpaper_colors(content), content); }
+        let adapted: serde_json::Value = serde_json::from_str(&normalize_wallpaper_colors(
+            r##"{"colors":{"color0":"#111122","color4":"#aabbcc","color7":"#eeeeff"}}"##)).unwrap();
+        assert_eq!(adapted["background"], "#111122");
+        assert_eq!(adapted["primary"], "#aabbcc");
+    }
 }

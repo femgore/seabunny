@@ -11,11 +11,15 @@ Item {
     readonly property string serpantinumStatus: serpantinumSource.status
     readonly property string serpantinumPath: serpantinumSource.sourcePath
     readonly property var serpantinumPalette: serpantinumSource.available ? SerpantinumColors.map(serpantinumSource.colors, themeMode) : null
-    readonly property bool followsSerpantinum: accentName === "serpantinum" && serpantinumPalette !== null
-    function resolveIcon(name) { return "image://seabunnyicon/" + encodeURIComponent(name); }
+    readonly property bool followsSerpantinum: (accentName === "auto" || accentName === "serpantinum") && serpantinumPalette !== null
+    function resolveIcon(name) {
+        return "image://seabunnyicon/" + encodeURIComponent(name)
+            + "?theme=" + (iconSource === "adwaita" ? "Adwaita" : "")
+            + "&color=" + encodeURIComponent(textMain.toString());
+    }
 
     property string themeMode: "auto" // "auto", "light", "dark"
-    property string accentName: "wallpaper" // "wallpaper", "lavender", "amber", "catppuccin", "nord", "tokyonight", "gruvbox", "rosepine"
+    property string accentName: "auto" // "wallpaper", "lavender", "amber", "catppuccin", "nord", "tokyonight", "gruvbox", "rosepine"
     FontLoader { id: symbolsFont; source: "qrc:/seabunny/fonts/SymbolsNerdFontMono-Regular.ttf" }
     readonly property string symbolsFontFamily: symbolsFont.name
     readonly property bool usesGlyphIcons: iconSource === "phosphor" || iconSource === "serpantinum"
@@ -60,13 +64,11 @@ Item {
         return "0 B";
     }
 
-    // Icon size in the file views (Ctrl + scroll / Ctrl +/-).
-    readonly property var zoomLevels: [0.75, 0.875, 1.0, 1.25, 1.5, 2.0, 4.0, 6.0, 8.0]
-    property int zoomIndex: 2
-    readonly property real zoom: zoomLevels[Math.max(0, Math.min(zoomLevels.length - 1, zoomIndex))]
-    function stepZoom(dir) {
-        zoomIndex = Math.max(0, Math.min(zoomLevels.length - 1, zoomIndex + dir));
-    }
+    // 0.1 grid sizes: square cells, filling each row, from 88 to 420 pixels.
+    property real gridItemSize: 220
+    readonly property real zoom: gridItemSize / 220
+    function stepZoom(dir) { gridItemSize = Math.max(88, Math.min(420, gridItemSize + dir * 22)); }
+    function resetZoom() { gridItemSize = 220; }
 
     // Text size multiplier (also follows the desktop font size).
     property real fontScaleSetting: 1.0
@@ -122,43 +124,46 @@ Item {
         }
     }
 
+    readonly property var wallpaperDark: SerpantinumColors.wallpaper(wallpaperData, true)
+    readonly property var wallpaperLight: SerpantinumColors.wallpaper(wallpaperData, false)
+
     readonly property var palettes: ({
         "wallpaper": {
-            darkBg: (wallpaperData && wallpaperData.background) ? wallpaperData.background : "#121214",
-            darkSurfaceLowest: (wallpaperData && wallpaperData.surface_container_lowest) ? wallpaperData.surface_container_lowest : ((wallpaperData && wallpaperData.background) ? wallpaperData.background : "#0d0e0f"),
-            darkSurfaceLow: (wallpaperData && wallpaperData.surface_container_low) ? wallpaperData.surface_container_low : ((wallpaperData && wallpaperData.surface_container) ? wallpaperData.surface_container : "#18191a"),
-            darkSurface: (wallpaperData && wallpaperData.surface_container) ? wallpaperData.surface_container : "#1e2021",
-            darkSurfaceHigh: (wallpaperData && wallpaperData.surface_container_high) ? wallpaperData.surface_container_high : "#282a2b",
-            darkSurfaceHighest: (wallpaperData && wallpaperData.surface_container_highest) ? wallpaperData.surface_container_highest : "#333537",
-            darkPrimary: (wallpaperData && wallpaperData.primary) ? wallpaperData.primary : "#cfc6ab",
-            darkFg: (wallpaperData && wallpaperData.on_primary) ? wallpaperData.on_primary : "#201b0a",
-            darkContainer: (wallpaperData && wallpaperData.primary_container) ? wallpaperData.primary_container : "#4c4732",
-            darkContainerFg: (wallpaperData && wallpaperData.on_primary_container) ? wallpaperData.on_primary_container : "#ece2c6",
-            darkSecondaryContainer: (wallpaperData && wallpaperData.secondary_container) ? wallpaperData.secondary_container : "#454336",
-            darkSecondaryContainerFg: (wallpaperData && wallpaperData.on_secondary_container) ? wallpaperData.on_secondary_container : "#ece2c6",
-            darkTertiaryContainer: (wallpaperData && wallpaperData.tertiary_container) ? wallpaperData.tertiary_container : "#524332",
-            darkTextMain: (wallpaperData && wallpaperData.on_surface) ? wallpaperData.on_surface : "#e4e2de",
-            darkTextMuted: (wallpaperData && wallpaperData.on_surface_variant) ? wallpaperData.on_surface_variant : "#c8c6c0",
-            darkOutline: (wallpaperData && wallpaperData.outline) ? wallpaperData.outline : "#92908a",
-            darkOutlineVariant: (wallpaperData && wallpaperData.outline_variant) ? wallpaperData.outline_variant : "#484742",
+            darkBg: (wallpaperDark && wallpaperDark.background) ? wallpaperDark.background : "#121214",
+            darkSurfaceLowest: (wallpaperDark && wallpaperDark.surface_container_lowest) ? wallpaperDark.surface_container_lowest : "#0d0e0f",
+            darkSurfaceLow: (wallpaperDark && wallpaperDark.surface_container_low) ? wallpaperDark.surface_container_low : "#18191a",
+            darkSurface: (wallpaperDark && wallpaperDark.surface_container) ? wallpaperDark.surface_container : "#1e2021",
+            darkSurfaceHigh: (wallpaperDark && wallpaperDark.surface_container_high) ? wallpaperDark.surface_container_high : "#282a2b",
+            darkSurfaceHighest: (wallpaperDark && wallpaperDark.surface_container_highest) ? wallpaperDark.surface_container_highest : "#333537",
+            darkPrimary: (wallpaperDark && wallpaperDark.primary) ? wallpaperDark.primary : "#cfc6ab",
+            darkFg: (wallpaperDark && wallpaperDark.on_primary) ? wallpaperDark.on_primary : "#201b0a",
+            darkContainer: (wallpaperDark && wallpaperDark.primary_container) ? wallpaperDark.primary_container : "#4c4732",
+            darkContainerFg: (wallpaperDark && wallpaperDark.on_primary_container) ? wallpaperDark.on_primary_container : "#ece2c6",
+            darkSecondaryContainer: (wallpaperDark && wallpaperDark.secondary_container) ? wallpaperDark.secondary_container : "#454336",
+            darkSecondaryContainerFg: (wallpaperDark && wallpaperDark.on_secondary_container) ? wallpaperDark.on_secondary_container : "#ece2c6",
+            darkTertiaryContainer: (wallpaperDark && wallpaperDark.tertiary_container) ? wallpaperDark.tertiary_container : "#524332",
+            darkTextMain: (wallpaperDark && wallpaperDark.on_surface) ? wallpaperDark.on_surface : "#e4e2de",
+            darkTextMuted: (wallpaperDark && wallpaperDark.on_surface_variant) ? wallpaperDark.on_surface_variant : "#c8c6c0",
+            darkOutline: (wallpaperDark && wallpaperDark.outline) ? wallpaperDark.outline : "#92908a",
+            darkOutlineVariant: (wallpaperDark && wallpaperDark.outline_variant) ? wallpaperDark.outline_variant : "#484742",
 
-            lightBg: "#fef8f4",
-            lightSurfaceLowest: "#ffffff",
-            lightSurfaceLow: "#f9f2ec",
-            lightSurface: "#f3ece4",
-            lightSurfaceHigh: "#ede5dc",
-            lightSurfaceHighest: "#e7ded4",
-            lightPrimary: (wallpaperData && wallpaperData.inverse_primary) ? wallpaperData.inverse_primary : ((wallpaperData && wallpaperData.primary) ? wallpaperData.primary : "#655e48"),
-            lightFg: "#ffffff",
-            lightContainer: (wallpaperData && wallpaperData.primary_container) ? wallpaperData.primary_container : "#ece2c6",
-            lightContainerFg: (wallpaperData && wallpaperData.on_primary_container) ? wallpaperData.on_primary_container : "#201b0a",
-            lightSecondaryContainer: (wallpaperData && wallpaperData.secondary_container) ? wallpaperData.secondary_container : "#ece2c6",
-            lightSecondaryContainerFg: (wallpaperData && wallpaperData.on_secondary_container) ? wallpaperData.on_secondary_container : "#201b0a",
-            lightTertiaryContainer: (wallpaperData && wallpaperData.tertiary_container) ? wallpaperData.tertiary_container : "#f0ddd0",
-            lightTextMain: "#1d1c16",
-            lightTextMuted: "#494740",
-            lightOutline: "#7a7770",
-            lightOutlineVariant: "#cbc7be"
+            lightBg: wallpaperLight.background || "#fef8f4",
+            lightSurfaceLowest: wallpaperLight.surface_container_lowest || "#ffffff",
+            lightSurfaceLow: wallpaperLight.surface_container_low || "#f9f2ec",
+            lightSurface: wallpaperLight.surface_container || "#f3ece4",
+            lightSurfaceHigh: wallpaperLight.surface_container_high || "#ede5dc",
+            lightSurfaceHighest: wallpaperLight.surface_container_highest || "#e7ded4",
+            lightPrimary: wallpaperLight.primary || "#655e48",
+            lightFg: wallpaperLight.on_primary || "#ffffff",
+            lightContainer: wallpaperLight.primary_container || "#ece2c6",
+            lightContainerFg: wallpaperLight.on_primary_container || "#201b0a",
+            lightSecondaryContainer: wallpaperLight.secondary_container || "#ece2c6",
+            lightSecondaryContainerFg: wallpaperLight.on_secondary_container || "#201b0a",
+            lightTertiaryContainer: wallpaperLight.tertiary_container || "#f0ddd0",
+            lightTextMain: wallpaperLight.on_surface || "#1d1c16",
+            lightTextMuted: wallpaperLight.on_surface_variant || "#494740",
+            lightOutline: wallpaperLight.outline || "#7a7770",
+            lightOutlineVariant: wallpaperLight.outline_variant || "#cbc7be"
         },
         "lavender": {
             darkBg: "#121214",
@@ -1944,7 +1949,7 @@ Item {
         "": "\uee82"
     })
 
-    readonly property var activePalette: followsSerpantinum ? serpantinumPalette : (palettes[accentName] || palettes["lavender"])
+    readonly property var activePalette: followsSerpantinum ? serpantinumPalette : (palettes[accentName === "auto" ? "wallpaper" : accentName] || palettes["lavender"])
 
     // Background & Surfaces
     readonly property color background: isDark ? activePalette.darkBg : activePalette.lightBg
@@ -1980,9 +1985,9 @@ Item {
     readonly property color hoverOverlay: isDark ? Qt.rgba(1.0, 1.0, 1.0, 0.08) : Qt.rgba(0.0, 0.0, 0.0, 0.06)
     readonly property color activeOverlay: isDark ? Qt.rgba(1.0, 1.0, 1.0, 0.14) : Qt.rgba(0.0, 0.0, 0.0, 0.10)
     readonly property color menuItemHover: isDark ? Qt.rgba(1.0, 1.0, 1.0, 0.09) : Qt.rgba(0.0, 0.0, 0.0, 0.05)
-    readonly property color danger: isDark ? "#f2b8b5" : "#ba1a1a"
-    readonly property color dangerContainer: isDark ? "#381e1e" : "#ffdad6"
-    readonly property color dangerFg: danger
+    readonly property color danger: followsSerpantinum ? serpantinumPalette.error : isDark ? "#f2b8b5" : "#ba1a1a"
+    readonly property color dangerContainer: followsSerpantinum ? serpantinumPalette.errorContainer : isDark ? "#381e1e" : "#ffdad6"
+    readonly property color dangerFg: followsSerpantinum ? serpantinumPalette.onErrorContainer : danger
     readonly property color track: isDark ? activePalette.darkSurfaceHighest : activePalette.lightSurfaceHigh
     readonly property color borderSubtle: outlineVariant
     readonly property color separator: outlineVariant
@@ -2064,8 +2069,15 @@ Item {
         if (value.length > 0) lowPowerSetting = value;
         value = readSetting("reduceMotion");
         if (value.length > 0) reduceMotionSetting = (value === "true");
-        value = readSetting("zoomIndex");
-        if (value.length > 0) zoomIndex = parseInt(value);
+        value = readSetting("gridItemSize");
+        if (value.length > 0 && isFinite(Number(value))) gridItemSize = Math.max(88, Math.min(420, Number(value)));
+        else {
+            // Compatibility with the first 0.2 development snapshot.
+            value = readSetting("zoomIndex");
+            var levels = [0.75, 0.875, 1, 1.25, 1.5, 2, 4, 6, 8];
+            if (value.length > 0 && levels[Number(value)] !== undefined)
+                gridItemSize = Math.max(88, Math.min(420, 220 * levels[Number(value)]));
+        }
         value = readSetting("fontScale");
         if (value.length > 0) fontScaleSetting = parseFloat(value) || 1.0;
         value = readSetting("clickToRename");
@@ -2111,7 +2123,7 @@ Item {
     onShareThrottleKbpsChanged: writeSetting("shareThrottleKbps", shareThrottleKbps)
     onLowPowerSettingChanged: writeSetting("lowPower", lowPowerSetting)
     onReduceMotionSettingChanged: writeSetting("reduceMotion", reduceMotionSetting)
-    onZoomIndexChanged: writeSetting("zoomIndex", zoomIndex)
+    onGridItemSizeChanged: writeSetting("gridItemSize", gridItemSize)
     onFontScaleSettingChanged: writeSetting("fontScale", fontScaleSetting)
     onClickToRenameChanged: writeSetting("clickToRename", clickToRename)
     onSearchContentsChanged: writeSetting("searchContents", searchContents)

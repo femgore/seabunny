@@ -340,12 +340,26 @@ Item {
         return paneEngine.location_kind === "dir" ? paneEngine.current_path : "";
     }
 
-    property real animZoom: theme.zoom
-    Behavior on animZoom { enabled: theme.animate; SpringAnimation { spring: 3.8; damping: 0.38 } }
-    readonly property real zoom: animZoom
-    readonly property int cellW: Math.round(124 * zoom)
-    readonly property int cellH: Math.round(114 * zoom)
-    readonly property int iconSize: Math.round(42 * zoom)
+    readonly property real zoom: theme.zoom
+    readonly property int gridColumns: Math.max(1, Math.floor(gridView.width / theme.gridItemSize + 0.000001))
+    readonly property real cellW: Math.max(1, gridView.width / gridColumns)
+    readonly property real cellH: cellW
+    readonly property int iconSize: Math.round(Math.max(16, Math.min(cellW - 24, cellH - 62) * 0.9))
+    readonly property int thumbnailEdge: {
+        var needed = Math.max(1, cellW - 24) * Screen.devicePixelRatio;
+        return needed <= 128 ? 128 : needed <= 256 ? 256 : needed <= 512 ? 512 : 1024;
+    }
+    function zoomGrid(direction) {
+        var available = gridView.width;
+        if (available <= 0) return;
+        var minimum = Math.max(1, Math.floor(available / 420 + 0.000001));
+        var maximum = Math.max(1, Math.floor(available / 88 + 0.000001));
+        var columns = Math.max(minimum, Math.min(maximum, gridColumns - direction));
+        theme.gridItemSize = direction > 0 && columns === minimum ? 420
+            : direction < 0 && columns === maximum ? 88
+            : Math.max(88, Math.min(420, available / columns));
+    }
+    function zoomFiles(direction) { if (isList()) theme.stepZoom(direction); else zoomGrid(direction); }
 
     ParallelAnimation {
         id: enterAnim
@@ -824,7 +838,11 @@ Item {
                 WheelHandler {
                     target: null
                     acceptedModifiers: Qt.ControlModifier
-                    onWheel: function(event) { theme.stepZoom(event.angleDelta.y > 0 ? 1 : -1); }
+                    onWheel: function(event) {
+                        var delta = event.angleDelta.y || event.pixelDelta.y;
+                        if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
+                        event.accepted = true;
+                    }
                 }
 
                 // Rubber band selection.
@@ -938,6 +956,7 @@ Item {
 
                 delegate: Item {
                     id: card
+                    objectName: "fileCard"
                     width: gridView.cellWidth
                     height: gridView.cellHeight
 
@@ -1012,18 +1031,19 @@ Item {
                         opacity: card.isCut ? 0.52 : 1.0
                         Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
                         anchors.fill: parent
-                        anchors.margins: 12 * pane.zoom
+                        anchors.margins: 12
                         spacing: 6
 
-                        Item { Layout.fillHeight: true }
-
                         Item {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: Math.round(46 * pane.zoom)
-                            Layout.preferredHeight: Math.round(46 * pane.zoom)
+                            objectName: "filePreview"
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 0
+                            Layout.preferredHeight: Math.max(0, card.height - 62)
 
                             SeabunnyIcon {
-                                visible: !card.hasThumb && theme.iconSource === "phosphor"
+                                objectName: "fileGlyphIcon"
+                                visible: !card.hasThumb && theme.usesGlyphIcons
                                 anchors.centerIn: parent
                                 name: card.isCut ? (card.is_dir ? "folder-dashed" : "file-dashed") : (card.icon || "file")
                                 size: pane.iconSize
@@ -1031,13 +1051,14 @@ Item {
                             }
 
                             Image {
+                                objectName: "fileSystemIcon"
                                 visible: !card.hasThumb && !theme.usesGlyphIcons
                                 anchors.centerIn: parent
                                 source: !theme.usesGlyphIcons ? window.systemIcon(card.system_icon) : ""
                                 width: pane.iconSize + 2
                                 height: pane.iconSize + 2
-                                sourceSize.width: 64 * pane.zoom
-                                sourceSize.height: 64 * pane.zoom
+                                sourceSize.width: pane.thumbnailEdge
+                                sourceSize.height: pane.thumbnailEdge
                                 fillMode: Image.PreserveAspectFit
                                 asynchronous: true
                             }
@@ -1052,25 +1073,26 @@ Item {
                                     radius: theme.radiusM
                                     color: "white"
                                     visible: false
-                                    layer.enabled: card.thumbable && theme.showThumbnails && !theme.lowPower
+                                    layer.enabled: card.thumbable && theme.showThumbnails && !theme.lowPower && !theme.softwareRendering
                                 }
 
                                 Image {
                                     id: thumbImg
+                                    objectName: "fileThumbnail"
                                     anchors.fill: parent
                                     source: theme.showThumbnails && card.thumbable && card.thumb_id.length > 0
                                         ? ("image://thumb/" + card.thumb_id) : ""
                                     fillMode: Image.PreserveAspectCrop
-                                    sourceSize.width: Math.round(48 * pane.zoom)
-                                    sourceSize.height: Math.round(48 * pane.zoom)
+                                    sourceSize.width: pane.thumbnailEdge
+                                    sourceSize.height: pane.thumbnailEdge
                                     asynchronous: true
                                     cache: true
                                     smooth: true
                                     // The rounded mask costs an offscreen layer: only for
-                                    // thumbable items, never in low-power mode. Must not
+                                    // thumbable items with a GPU, never in low-power mode. Must not
                                     // depend on image status: toggling the layer while the
                                     // thumbnail loads crashes Qt during DPI updates.
-                                    layer.enabled: card.thumbable && theme.showThumbnails && !theme.lowPower
+                                    layer.enabled: card.thumbable && theme.showThumbnails && !theme.lowPower && !theme.softwareRendering
                                     layer.effect: MultiEffect {
                                         maskEnabled: true
                                         maskSource: thumbMask
@@ -1138,7 +1160,6 @@ Item {
                             }
                         }
 
-                        Item { Layout.fillHeight: true }
                     }
 
                     MouseArea {
@@ -1322,7 +1343,11 @@ Item {
                 WheelHandler {
                     target: null
                     acceptedModifiers: Qt.ControlModifier
-                    onWheel: function(event) { theme.stepZoom(event.angleDelta.y > 0 ? 1 : -1); }
+                    onWheel: function(event) {
+                        var delta = event.angleDelta.y || event.pixelDelta.y;
+                        if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
+                        event.accepted = true;
+                    }
                 }
                 footer: Item {
                     width: listView.width
@@ -1400,7 +1425,7 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
 
                                 SeabunnyIcon {
-                                    visible: !row.hasThumb && theme.iconSource === "phosphor"
+                                    visible: !row.hasThumb && theme.usesGlyphIcons
                                     anchors.centerIn: parent
                                     name: row.isCut ? (row.is_dir ? "folder-dashed" : "file-dashed") : (row.icon || "file")
                                     size: 18

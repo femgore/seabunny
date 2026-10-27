@@ -36,8 +36,10 @@ Item {
                     if (saving) {
                         explorer.testSidebar.expanded = false; explorer.testSidebar.expandedWidth = 376;
                         explorer.engine.set_sort("size", false);
+                        explorer.testTheme.gridItemSize = 320;
                     } else {
                         check(!explorer.testSidebar.expanded && explorer.testSidebar.expandedWidth === 376, "explorer restores collapsed state and width after process relaunch");
+                        check(explorer.testTheme.gridItemSize === 320, "grid zoom survives process relaunch");
                         check(explorer.engine.sort_by === "size" && !explorer.engine.sort_ascending, "folder sorting survives process relaunch");
                     }
                     picker = create(request); phase++; return;

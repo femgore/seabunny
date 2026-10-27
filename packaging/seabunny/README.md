@@ -62,7 +62,8 @@ shared desktop thumbnail cache; archive previews use private temporary paths.
 
 ## the colors and the other window
 
-select Serpantinum in the accent settings to follow its live colors. the explorer
+Automatic colors follow an available Serpantinum palette by default. select a
+manual palette to stop following, or Serpantinum explicitly to keep that source. the explorer
 and picker look in this order:
 
 1. `SEABUNNY_SERPANTINUM_COLORS`
@@ -70,8 +71,10 @@ and picker look in this order:
 3. `$QS_STATE_DIR/qs_colors.json`
 4. `$XDG_STATE_HOME/seabunny/serpantinum-colors.json`
 5. `$XDG_STATE_HOME/serpantinum/qs_colors.json`
+6. the legacy `~/serpantinum-migration/stock-session/state/qs_colors.json`, if present
 
-`XDG_STATE_HOME` defaults to `~/.local/state`. if your shell keeps its palette
+`XDG_STATE_HOME` defaults to `~/.local/state`. the isolated development launcher
+passes the desktop's original state directory separately for palette discovery. if your shell keeps its palette
 somewhere custom, a link at option 4 lets both windows find it without relying on
 whatever environment the launcher happened to inherit. replace the example path
 with your actual generated palette:
