@@ -207,7 +207,7 @@ def publish(source, destination, label):
 
 
 def execute(request):
-    if request.get("action") not in ("list", "copy", "extract", "open"):
+    if request.get("action") not in ("list", "index", "copy", "extract", "open"):
         raise ValueError("Unknown archive operation")
     if request["action"] != "open":
         return execute_unlocked(request)
@@ -225,6 +225,8 @@ def execute_unlocked(request):
     index = catalog(path)
     if fingerprint(path) != identity:
         raise ValueError("Archive changed while its index was being read")
+    if request["action"] == "index":
+        return {"entries": [dict(entry, modified_str=datetime.datetime.fromtimestamp(entry["modified"]).strftime("%Y-%m-%d %H:%M:%S")) for entry in index.values()]}
     if request["action"] == "list":
         return {"entries": children(index, request.get("directory", ""))}
     selected = [safe_name(name) for name in request.get("selection", [])]

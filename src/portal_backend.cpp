@@ -1,5 +1,7 @@
 #include "portal_backend.h"
-#include "thumbnail_provider.h"
+#ifndef SEABUNNY_PORTAL_CONTROLLER_TEST
+#include "seabunny/native.h"
+#endif
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMetaType>
@@ -9,6 +11,9 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QMimeDatabase>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QRegularExpression>
@@ -112,6 +117,12 @@ PortalRequest::PortalRequest(const QString &method, const QString &title, const 
         {"modal", o.value("modal", true)}, {"folder", folder}, {"name", name},
         {"filters", filterNames}, {"filterIndex", currentIndex}, {"choices", choices},
         {"acceptLabel", displayLabel}, {"acceptKey", acceptKey}};
+}
+QString PortalRequest::filterRules(int index) const {
+    QJsonArray rules;
+    if (index >= 0 && index < m_filters.size()) for (const auto &rule : m_filters[index].rules)
+        rules.append(QJsonObject{{"kind", int(rule.kind)}, {"pattern", rule.pattern}});
+    return QString::fromUtf8(QJsonDocument(rules).toJson(QJsonDocument::Compact));
 }
 bool PortalRequest::matches(const QString &path, int index) const {
     QFileInfo info(path);
@@ -268,8 +279,12 @@ bool PortalBackend::handleMessage(const QDBusMessage &message, const QDBusConnec
     return true;
 }
 bool PortalBackend::showDialog(PortalRequest *request, const QString &parent) {
+#ifdef SEABUNNY_PORTAL_CONTROLLER_TEST
+    Q_UNUSED(request); Q_UNUSED(parent); return false;
+#else
     auto engine = new QQmlApplicationEngine(request);
-    install_thumbnail_provider(*engine);
+    rust::Vec<rust::String> paths;
+    seabunny::setup_engine(*engine, paths, "chooser,new-window");
     engine->rootContext()->setContextProperty("portalRequest", request);
     engine->load(QUrl("qrc:/qt/qml/app/seabunny/qml/main.qml"));
     if (engine->rootObjects().isEmpty()) return false;
@@ -284,7 +299,12 @@ bool PortalBackend::showDialog(PortalRequest *request, const QString &parent) {
         }
         window->show();
     }
+    if (window) QObject::connect(request, &QObject::destroyed, window, [window]() {
+        // Request cancellation can delete an engine before a resize debounce fires.
+        QMetaObject::invokeMethod(window, "persistSidebarState", Qt::DirectConnection);
+    });
     return window != nullptr;
+#endif
 }
 bool start_seabunny_portal() {
     portalMode = true;

@@ -6,15 +6,46 @@ import app.seabunny
 Item {
     id: root
 
-    Layout.fillWidth: true
+    Layout.fillWidth: label.length > 0
     Layout.preferredHeight: 32
     implicitHeight: 32
-    implicitWidth: 180
+    implicitWidth: label.length > 0 ? 180 : 46
 
     property bool checked: false
     property string label: ""
 
     signal toggled(bool checked)
+
+    transform: Translate { id: switchTranslate; y: 0 }
+
+    ParallelAnimation {
+        id: switchPopAnim
+        property int delayMs: 0
+        SequentialAnimation {
+            PauseAnimation { duration: switchPopAnim.delayMs }
+            ParallelAnimation {
+                NumberAnimation { target: switchTranslate; property: "y"; from: -10; to: 0; duration: 200; easing.type: Easing.OutCubic }
+                NumberAnimation { target: root; property: "scale"; from: 0.90; to: 1.0; duration: 220; easing.type: Easing.OutBack; easing.overshoot: 1.2 }
+                NumberAnimation { target: root; property: "opacity"; from: 0.0; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+            }
+        }
+    }
+
+    function popIn(delayMs) {
+        switchPopAnim.stop();
+        switchTranslate.y = -10;
+        root.scale = 0.90;
+        root.opacity = 0.0;
+        switchPopAnim.delayMs = delayMs || 0;
+        switchPopAnim.start();
+    }
+    function playPop(delayMs) { popIn(delayMs); }
+    function reset() {
+        switchPopAnim.stop();
+        switchTranslate.y = 0;
+        root.scale = 1.0;
+        root.opacity = 1.0;
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -23,7 +54,7 @@ Item {
         Text {
             text: root.label
             color: theme.textMain
-            font.pixelSize: 13
+            font.pixelSize: theme.fs(13)
             Layout.fillWidth: true
             elide: Text.ElideRight
         }
@@ -38,8 +69,8 @@ Item {
             border.width: root.checked ? 0 : 1
             border.color: theme.outline
 
-            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(140)} }
-            Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(140)} }
+            Behavior on color { enabled: theme.animate; ColorAnimation { duration: 140 } }
+            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: 140 } }
 
             Rectangle {
                 id: thumb
@@ -50,9 +81,9 @@ Item {
                 x: root.checked ? (track.width - width - 4) : 4
                 color: root.checked ? theme.primaryFg : theme.outline
 
-                Behavior on x { enabled: !theme.reducedMotion; SpringAnimation { spring: 4; damping: 0.7 } }
-                Behavior on width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(120); easing.type: Easing.OutCubic } }
-                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(140)} }
+                Behavior on x { enabled: theme.animate; SpringAnimation { spring: 4; damping: 0.7 } }
+                Behavior on width { enabled: theme.animate; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                Behavior on color { enabled: theme.animate; ColorAnimation { duration: 140 } }
             }
 
             MouseArea {

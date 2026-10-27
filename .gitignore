@@ -1,5 +1,5 @@
 # Build products and editor state
-/target/
+/target
 /result
 /.direnv/
 /.idea/

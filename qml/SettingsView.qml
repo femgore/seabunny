@@ -23,9 +23,8 @@ Item {
     }
 
     readonly property bool card1Match: matchesQuery("theme appearance light dark auto mode color scheme")
-    readonly property bool card2Match: matchesQuery("theme palette accent colors wallpaper serpantinum matugen pywal catppuccin nord tokyonight gruvbox rosepine amber lavender violet ricing")
-    readonly property bool card3Match: matchesQuery("top left brand seabunny logo badge show hide")
-    readonly property bool card4Match: matchesQuery("icon style vector phosphor system adwaita desktop theme serpantinum symbols nerd")
+    readonly property bool card2Match: matchesQuery("theme palette accent colors wallpaper catppuccin nord tokyonight gruvbox rosepine amber lavender violet ricing")
+    readonly property bool card4Match: matchesQuery("icon style vector phosphor system adwaita desktop theme")
     readonly property bool card5Match: matchesQuery("phosphor weight variant thin light regular bold fill duotone stroke thickness")
 
     readonly property bool card6Match: matchesQuery("left click drag action selection box pan scroll view rubberband marquee mouse")
@@ -34,21 +33,33 @@ Item {
     readonly property bool card9Match: matchesQuery("disambiguate duplicate names parent folder prefix search")
 
     readonly property bool card10Match: matchesQuery("experimental icon styles adwaita advanced archives compress cpio tar formats")
-    readonly property bool card11Match: matchesQuery("about seabunny version femgore author credits")
+    readonly property bool card11Match: matchesQuery("about seabunny version musa orbitos author credits")
     readonly property bool card12Match: matchesQuery("experimental pc customization dashboard layout sections this pc")
+    readonly property bool card13Match: matchesQuery("performance low power mode battery old slow computer animations effects gpu")
+    readonly property bool card14Match: matchesQuery("reduce motion animations accessibility")
+    readonly property bool card15Match: matchesQuery("text size font scale accessibility larger")
+    readonly property bool card16Match: matchesQuery("restore session tabs remember last folder window startup")
+    readonly property bool card17Match: matchesQuery("click rename inline single click")
+    readonly property bool card18Match: matchesQuery("search file contents text inside")
+    readonly property bool card19Match: matchesQuery("experimental share via link cloudflare tunnel p2p host local send")
+    readonly property bool card20Match: matchesQuery("share settings link compression password expiration throttle active shares cloudflare tunnel")
+    readonly property bool card21Match: matchesQuery("network smb samba nas share server mount connect remote windows keyring")
 
-    readonly property int interfaceMatches: (card1Match ? 1 : 0) + (card2Match ? 1 : 0) + (card3Match ? 1 : 0) + (card4Match ? 1 : 0) + (card5Match ? 1 : 0)
-    readonly property bool motionMatch: matchesQuery("reduced motion animations snappy accessibility")
-    readonly property int behaviorMatches: (motionMatch ? 1 : 0) + (card6Match ? 1 : 0) + (card7Match ? 1 : 0) + (card8Match ? 1 : 0) + (card9Match ? 1 : 0)
-    readonly property int experimentalMatches: (card10Match ? 1 : 0) + (card12Match ? 1 : 0)
+    readonly property int interfaceMatches: (card1Match ? 1 : 0) + (card2Match ? 1 : 0) + (card4Match ? 1 : 0) + (card5Match ? 1 : 0)
+    readonly property int behaviorMatches: (card6Match ? 1 : 0) + (card7Match ? 1 : 0) + (card8Match ? 1 : 0) + (card9Match ? 1 : 0)
+        + (card16Match ? 1 : 0) + (card17Match ? 1 : 0) + (card18Match ? 1 : 0)
+    readonly property int accessibilityMatches: (card13Match ? 1 : 0) + (card14Match ? 1 : 0) + (card15Match ? 1 : 0)
+    readonly property int experimentalMatches: (card10Match ? 1 : 0) + (card12Match ? 1 : 0) + (card19Match ? 1 : 0)
+    readonly property int shareMatches: theme.shareViaLinkEnabled && card20Match ? 1 : 0
+    readonly property int networkMatches: (card21Match ? 1 : 0)
     readonly property int aboutMatches: (card11Match ? 1 : 0)
-    readonly property int totalMatches: interfaceMatches + behaviorMatches + experimentalMatches + aboutMatches
+    readonly property int totalMatches: interfaceMatches + behaviorMatches + accessibilityMatches + experimentalMatches + shareMatches + networkMatches + aboutMatches
 
     // Space still claimed above `panel` by panels that are painted while fading
     // out. Overlapping the incoming tab with the outgoing one lets the switch
     // cross-fade instead of dropping the outgoing panel in one frame.
     function fadeOverlapAbove(panel) {
-        var panels = [tabInterface, tabBehavior, tabExperimental, tabAbout];
+        var panels = [tabInterface, tabBehavior, tabAccessibility, tabExperimental, tabShare, tabNetwork, tabAbout];
         var overlap = 0;
         for (var i = 0; i < panels.length; i++) {
             var p = panels[i];
@@ -63,26 +74,22 @@ Item {
     RowLayout {
         anchors.fill: parent
         spacing: 16
-
-        // Left Navigation Tabs
         Rectangle {
             Layout.fillHeight: true
-            Layout.preferredWidth: 180
+            Layout.preferredWidth: Math.max(128, Math.min(200, parent.width * 0.40))
             radius: theme.radiusL
             color: theme.surfaceContainer
 
-            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 12
                 spacing: 6
-
-                // Section Label
                 Text {
-                    text: "SETTINGS"
+                    text: qsTr("SETTINGS")
                     color: theme.textMuted
-                    font.pixelSize: 10
+                    font.pixelSize: theme.fs(10)
                     font.bold: true
                     font.letterSpacing: 1.2
                     Layout.margins: 6
@@ -104,27 +111,62 @@ Item {
                         height: tabNavList.rowHeight
                         radius: theme.radiusFull
                         color: theme.primaryContainer
-                        y: Math.max(0, Math.min(settingsView.activeTab, tabNavRepeater.count - 1)) * (tabNavList.rowHeight + tabNavList.rowGap)
+                        y: {
+                            var targetIdx = 0;
+                            var m = tabNavRepeater.model || [];
+                            for (var i = 0; i < m.length; i++) {
+                                var tabId = m[i].id;
+                                if ((tabId === "interface" && settingsView.activeTab === 0) ||
+                                    (tabId === "behavior" && settingsView.activeTab === 1) ||
+                                    (tabId === "accessibility" && settingsView.activeTab === 2) ||
+                                    (tabId === "experimental" && settingsView.activeTab === 3) ||
+                                    (tabId === "share" && settingsView.activeTab === 5) ||
+                                    (tabId === "network" && settingsView.activeTab === 6) ||
+                                    (tabId === "about" && settingsView.activeTab === 4)) {
+                                    targetIdx = i;
+                                    break;
+                                }
+                            }
+                            return targetIdx * (tabNavList.rowHeight + tabNavList.rowGap);
+                        }
 
-                        Behavior on y { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationNormal; easing.type: Easing.OutCubic } }
-                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                        Behavior on y { enabled: theme.animate; NumberAnimation { duration: theme.durationNormal; easing.type: Easing.OutCubic } }
+                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                     }
 
                     Repeater {
                         id: tabNavRepeater
-                        model: [
-                            { name: "Interface", iconName: "palette" },
-                            { name: "Behavior", iconName: "gear" },
-                            { name: "Experimental", iconName: "sparkle" },
-                            { name: "About Seabunny", iconName: "seabunny" }
-                        ]
+                        model: {
+                            var tabs = [
+                                { id: "interface", name: "Interface", iconName: "palette" },
+                                { id: "behavior", name: "Behavior", iconName: "gear" },
+                                { id: "accessibility", name: "Accessibility", iconName: "person-arms-spread" },
+                                { id: "experimental", name: "Experimental", iconName: "sparkle" }
+                            ];
+                            if (theme.shareViaLinkEnabled) {
+                                tabs.push({ id: "share", name: "Share", iconName: "share-network" });
+                            }
+                            tabs.push({ id: "network", name: "Network", iconName: "network" });
+                            tabs.push({ id: "about", name: "About Seabunny", iconName: "bread" });
+                            return tabs;
+                        }
 
                         delegate: Item {
                             width: tabNavList.width
                             height: tabNavList.rowHeight
                             y: index * (tabNavList.rowHeight + tabNavList.rowGap)
 
-                            readonly property bool isCurrent: settingsView.activeTab === index
+                            readonly property bool isCurrent: {
+                                var currentTabId = tabNavRepeater.model[index] ? tabNavRepeater.model[index].id : "";
+                                if (currentTabId === "interface") return settingsView.activeTab === 0;
+                                if (currentTabId === "behavior") return settingsView.activeTab === 1;
+                                if (currentTabId === "accessibility") return settingsView.activeTab === 2;
+                                if (currentTabId === "experimental") return settingsView.activeTab === 3;
+                                if (currentTabId === "share") return settingsView.activeTab === 5;
+                                if (currentTabId === "network") return settingsView.activeTab === 6;
+                                if (currentTabId === "about") return settingsView.activeTab === 4;
+                                return false;
+                            }
                             readonly property bool isHovered: tabMouse.containsMouse
 
                             Rectangle {
@@ -132,7 +174,7 @@ Item {
                                 radius: theme.radiusFull
                                 color: (isHovered && !isCurrent) ? theme.surfaceContainerHigh : "transparent"
 
-                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -140,26 +182,21 @@ Item {
                                     anchors.rightMargin: 14
                                     spacing: 10
 
-                                    SeabunnyLogo {
-                                        visible: modelData.iconName === "seabunny"
-                                        size: 22
-                                        color: isCurrent ? theme.primaryContainerFg : theme.textMuted
-                                    }
                                     SeabunnyIcon {
-                                        visible: modelData.iconName !== "seabunny"
                                         name: modelData.iconName
                                         size: 18
                                         color: isCurrent ? theme.primaryContainerFg : (isHovered ? theme.textMain : theme.textMuted)
-                                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                     }
 
                                     Text {
                                         text: modelData.name
                                         color: isCurrent ? theme.primaryContainerFg : (isHovered ? theme.textMain : theme.textMuted)
-                                        font.pixelSize: 13
+                                        font.pixelSize: theme.fs(13)
                                         font.bold: isCurrent
+                                        elide: Text.ElideRight
                                         Layout.fillWidth: true
-                                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                     }
                                 }
                             }
@@ -171,7 +208,14 @@ Item {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     settingsView.searchCleared();
-                                    settingsView.activeTab = index;
+                                    var tabId = tabNavRepeater.model[index].id;
+                                    if (tabId === "interface") settingsView.activeTab = 0;
+                                    else if (tabId === "behavior") settingsView.activeTab = 1;
+                                    else if (tabId === "accessibility") settingsView.activeTab = 2;
+                                    else if (tabId === "experimental") settingsView.activeTab = 3;
+                                    else if (tabId === "share") settingsView.activeTab = 5;
+                                    else if (tabId === "network") settingsView.activeTab = 6;
+                                    else if (tabId === "about") settingsView.activeTab = 4;
                                 }
                             }
                         }
@@ -181,8 +225,6 @@ Item {
                 Item { Layout.fillHeight: true }
             }
         }
-
-        // Right Content Area
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -190,7 +232,7 @@ Item {
             color: theme.surfaceContainerLow
             clip: true
 
-            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
             ScrollView {
                 id: contentScroll
@@ -203,19 +245,18 @@ Item {
                     id: contentColumn
                     width: contentScroll.availableWidth
                     spacing: 16
-
-                    // Single Unified Top Header (No dot, no repeated pill)
                     Text {
                         text: settingsView.searchQuery.length > 0
                             ? "Settings"
-                            : (settingsView.activeTab === 0 ? "Interface" : (settingsView.activeTab === 1 ? "Behavior" : (settingsView.activeTab === 2 ? "Experimental" : "About Seabunny")))
+                            : (settingsView.activeTab === 0 ? "Interface" : (settingsView.activeTab === 1 ? "Behavior" : (settingsView.activeTab === 2 ? "Accessibility" : (settingsView.activeTab === 3 ? "Experimental" : (settingsView.activeTab === 5 ? "Share via Link" : (settingsView.activeTab === 6 ? "Network" : "About Seabunny"))))))
                         color: theme.textMain
-                        font.pixelSize: 26
+                        font.pixelSize: theme.fs(26)
                         font.bold: true
                         font.letterSpacing: -0.5
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                     }
-
-                    // Search Results Header (when searching)
                     RowLayout {
                         Layout.fillWidth: true
                         visible: settingsView.searchQuery.length > 0 && settingsView.totalMatches > 0
@@ -223,9 +264,9 @@ Item {
 
                         SeabunnyIcon { name: "magnifying-glass"; size: 16; color: theme.primary }
                         Text {
-                            text: "Settings search results"
+                            text: qsTr("Settings search results")
                             color: theme.textMain
-                            font.pixelSize: 16
+                            font.pixelSize: theme.fs(16)
                             font.bold: true
                         }
                         Rectangle {
@@ -239,13 +280,11 @@ Item {
                                 anchors.centerIn: parent
                                 text: settingsView.totalMatches + " found"
                                 color: theme.primaryContainerFg
-                                font.pixelSize: 11
+                                font.pixelSize: theme.fs(11)
                                 font.bold: true
                             }
                         }
                     }
-
-                    // Empty Search Results State
                     ColumnLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 40
@@ -264,14 +303,10 @@ Item {
                             Layout.alignment: Qt.AlignHCenter
                             text: "No settings found matching \"" + settingsView.searchQuery + "\""
                             color: theme.textMuted
-                            font.pixelSize: 14
+                            font.pixelSize: theme.fs(14)
                             font.bold: true
                         }
                     }
-
-                    // ==========================================
-                    // TAB 0: INTERFACE
-                    // ==========================================
                     ColumnLayout {
                         id: tabInterface
                         Layout.fillWidth: true
@@ -288,37 +323,36 @@ Item {
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
-                        Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                        Behavior on slideOffset { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         transform: Translate { y: tabInterface.slideOffset }
-
-                        // 1. Theme (Auto, Light, Dark)
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card1Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: schemeRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            ColumnLayout {
                                 id: schemeRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 16
+                                spacing: 12
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Theme"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: theme.followsSerpantinum ? "Auto matches Serpantinum; Light/Dark can override" : "Light, dark, or system appearance"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Theme"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Light, dark, or system appearance"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
-                                Item { Layout.fillWidth: true }
 
-                                RowLayout {
+                                Flow {
+                                    id: schemePills
+                                    Layout.fillWidth: true
                                     spacing: 8
-
-                                    // AUTO PILL
                                     Item {
                                         width: 88; height: 38
                                         Rectangle {
@@ -329,18 +363,18 @@ Item {
                                             border.color: theme.themeMode === "auto" ? theme.primary : theme.outlineVariant
                                             scale: autoMouse.pressed ? 0.94 : (autoMouse.containsMouse ? 1.04 : 1.0)
 
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                            Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: "Auto"
+                                                text: qsTr("Auto")
                                                 color: theme.themeMode === "auto" ? theme.primaryContainerFg : theme.textMain
-                                                font.pixelSize: 12
+                                                font.pixelSize: theme.fs(12)
                                                 font.bold: true
-                                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                             }
                                         }
                                         MouseArea {
@@ -351,8 +385,6 @@ Item {
                                             onClicked: theme.themeMode = "auto"
                                         }
                                     }
-
-                                    // LIGHT PILL
                                     Item {
                                         width: 88; height: 38
                                         Rectangle {
@@ -363,18 +395,18 @@ Item {
                                             border.color: theme.themeMode === "light" ? theme.primary : theme.outlineVariant
                                             scale: lightMouse.pressed ? 0.94 : (lightMouse.containsMouse ? 1.04 : 1.0)
 
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                            Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: "Light"
+                                                text: qsTr("Light")
                                                 color: theme.themeMode === "light" ? theme.primaryContainerFg : theme.textMain
-                                                font.pixelSize: 12
+                                                font.pixelSize: theme.fs(12)
                                                 font.bold: true
-                                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                             }
                                         }
                                         MouseArea {
@@ -385,8 +417,6 @@ Item {
                                             onClicked: theme.themeMode = "light"
                                         }
                                     }
-
-                                    // DARK PILL
                                     Item {
                                         width: 88; height: 38
                                         Rectangle {
@@ -397,18 +427,18 @@ Item {
                                             border.color: theme.themeMode === "dark" ? theme.primary : theme.outlineVariant
                                             scale: darkMouse.pressed ? 0.94 : (darkMouse.containsMouse ? 1.04 : 1.0)
 
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                            Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                            Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: "Dark"
+                                                text: qsTr("Dark")
                                                 color: theme.themeMode === "dark" ? theme.primaryContainerFg : theme.textMain
-                                                font.pixelSize: 12
+                                                font.pixelSize: theme.fs(12)
                                                 font.bold: true
-                                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                             }
                                         }
                                         MouseArea {
@@ -422,15 +452,14 @@ Item {
                                 }
                             }
                         }
-
-                        // 2. Palette Picker (Pill Swatches)
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card2Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: palContentCol.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
                             ColumnLayout {
                                 id: palContentCol
@@ -439,18 +468,9 @@ Item {
                                 spacing: 14
 
                                 ColumnLayout {
-                                    Layout.fillWidth: true
                                     spacing: 2
-                                    Text { text: "Color palette"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Wallpaper extraction & community color schemes"; color: theme.textMuted; font.pixelSize: 11 }
-                                    Text {
-                                        visible: theme.accentName === "serpantinum"
-                                        Layout.fillWidth: true
-                                        text: theme.serpantinumStatus + "\n" + theme.serpantinumPath
-                                        color: theme.textMuted
-                                        font.pixelSize: 11
-                                        wrapMode: Text.WrapAnywhere
-                                    }
+                                    Text { text: qsTr("Color palette"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true }
+                                    Text { text: qsTr("Wallpaper extraction & community color schemes"); color: theme.textMuted; font.pixelSize: theme.fs(11) }
                                 }
 
                                 Flow {
@@ -459,22 +479,21 @@ Item {
 
                                     Repeater {
                                         model: [
-                                            { id: "wallpaper", label: "Wallpaper" },
-                                            { id: "serpantinum", label: "Serpantinum" },
-                                            { id: "lavender", label: "Seabunny Violet" },
-                                            { id: "amber", label: "Seabunny Amber" },
-                                            { id: "catppuccin", label: "Catppuccin" },
-                                            { id: "nord", label: "Nord" },
-                                            { id: "tokyonight", label: "Tokyo Night" },
-                                            { id: "gruvbox", label: "Gruvbox" },
-                                            { id: "rosepine", label: "Rosé Pine" }
+                                            { id: "serpantinum", label: qsTr("Serpantinum (Live)") },
+                                            { id: "wallpaper", label: qsTr("Wallpaper") },
+                                            { id: "lavender", label: qsTr("Seabunny Violet") },
+                                            { id: "amber", label: qsTr("Seabunny Amber") },
+                                            { id: "catppuccin", label: qsTr("Catppuccin") },
+                                            { id: "nord", label: qsTr("Nord") },
+                                            { id: "tokyonight", label: qsTr("Tokyo Night") },
+                                            { id: "gruvbox", label: qsTr("Gruvbox") },
+                                            { id: "rosepine", label: qsTr("Rosé Pine") }
                                         ]
 
                                         delegate: Item {
                                             width: 126; height: 38
 
-                                            readonly property var swatch: modelData.id === "serpantinum" && theme.serpantinumPalette
-                                                ? theme.serpantinumPalette : (theme.palettes[modelData.id] || theme.palettes["lavender"])
+                                            readonly property var swatch: theme.palettes[modelData.id] ? theme.palettes[modelData.id] : theme.palettes["lavender"]
 
                                             Rectangle {
                                                 anchors.fill: parent
@@ -485,10 +504,10 @@ Item {
 
                                                 scale: palMouse.pressed ? 0.94 : (palMouse.containsMouse ? 1.04 : 1.0)
 
-                                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                                Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                                Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                                Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                                                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                                Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                                Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                                Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
 
                                                 RowLayout {
                                                     anchors.centerIn: parent
@@ -501,9 +520,9 @@ Item {
                                                     Text {
                                                         text: modelData.label
                                                         color: theme.accentName === modelData.id ? theme.primaryContainerFg : theme.textMain
-                                                        font.pixelSize: 11
+                                                        font.pixelSize: theme.fs(11)
                                                         font.bold: theme.accentName === modelData.id
-                                                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                                                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
                                                     }
                                                 }
                                             }
@@ -520,82 +539,89 @@ Item {
                                 }
                             }
                         }
-
-                        // 3. Top-Left Seabunny Logo Badge Toggle
                         Rectangle {
-                            visible: settingsView.searchQuery.length === 0 || settingsView.card3Match
+                            visible: theme.showExperimentalIcons && (settingsView.searchQuery.length === 0 || settingsView.card4Match)
                             Layout.fillWidth: true
-                            implicitHeight: brandRow.implicitHeight + 32
+                            Layout.minimumWidth: 0
+                            implicitHeight: iconSrcRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
-                                id: brandRow
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                spacing: 14
-
-                                ColumnLayout {
-                                    spacing: 3
-                                    Text { text: "Top-Left Seabunny Badge"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Show the themed sea bunny badge in the top bar"; color: theme.textMuted; font.pixelSize: 11 }
-                                }
-
-                                SeabunnySwitch {
-                                    id: brandBadgeSwitch
-                                    checked: theme.showBrandBadge
-                                    onToggled: theme.showBrandBadge = checked
-                                }
-                            }
-
-                            Connections {
-                                target: theme
-                                function onShowBrandBadgeChanged() {
-                                    if (brandBadgeSwitch.checked !== theme.showBrandBadge)
-                                        brandBadgeSwitch.checked = theme.showBrandBadge
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            visible: settingsView.searchQuery.length === 0 || settingsView.card4Match
-                            Layout.fillWidth: true
-                            implicitHeight: iconChoices.implicitHeight + 32
-                            radius: theme.radiusL
-                            color: theme.surfaceContainer
                             ColumnLayout {
-                                id: iconChoices
+                                id: iconSrcRow
                                 anchors.fill: parent
                                 anchors.margins: 16
                                 spacing: 12
-                                Text { text: "Icon style"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                Text { text: "Desktop themes or bundled glyph icons — changes apply immediately"; color: theme.textMuted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                                Flow {
+
+                                ColumnLayout {
+                                    spacing: 3
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: implicitHeight
+                                    Text { text: qsTr("Icon style"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Phosphor, system theme, or GNOME Adwaita"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                }
+
+
+                                Flow {
+                                    id: iconPills
+                                    Layout.fillWidth: true
                                     spacing: 8
-                                    Repeater {
-                                        model: [{key: "phosphor", title: "Phosphor"}, {key: "system", title: "System / GNOME"},
-                                            {key: "adwaita", title: "Adwaita"}, {key: "serpantinum", title: "Serpantinum Symbols"}]
-                                        delegate: SeabunnyButton {
-                                            text: modelData.title
-                                            variant: theme.iconSource === modelData.key ? "tonal" : "outlined"
-                                            onClicked: theme.iconSource = modelData.key
+
+                                    Item {
+                                        width: 90; height: 38
+                                        Rectangle {
+                                            anchors.fill: parent; radius: theme.radiusFull
+                                            color: theme.iconSource === "phosphor" ? theme.primaryContainer : theme.surfaceContainerHigh
+                                            border.width: theme.iconSource === "phosphor" ? 2 : 1
+                                            border.color: theme.iconSource === "phosphor" ? theme.primary : theme.outlineVariant
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Text { anchors.centerIn: parent; text: qsTr("Phosphor"); color: theme.iconSource === "phosphor" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
                                         }
+                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "phosphor" }
+                                    }
+
+                                    Item {
+                                        width: 90; height: 38
+                                        Rectangle {
+                                            anchors.fill: parent; radius: theme.radiusFull
+                                            color: theme.iconSource === "system" ? theme.primaryContainer : theme.surfaceContainerHigh
+                                            border.width: theme.iconSource === "system" ? 2 : 1
+                                            border.color: theme.iconSource === "system" ? theme.primary : theme.outlineVariant
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Text { anchors.centerIn: parent; text: qsTr("System"); color: theme.iconSource === "system" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
+                                        }
+                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "system" }
+                                    }
+
+                                    Item {
+                                        width: 90; height: 38
+                                        Rectangle {
+                                            anchors.fill: parent; radius: theme.radiusFull
+                                            color: theme.iconSource === "adwaita" ? theme.primaryContainer : theme.surfaceContainerHigh
+                                            border.width: theme.iconSource === "adwaita" ? 2 : 1
+                                            border.color: theme.iconSource === "adwaita" ? theme.primary : theme.outlineVariant
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
+                                            Text { anchors.centerIn: parent; text: qsTr("Adwaita"); color: theme.iconSource === "adwaita" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true; Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } } }
+                                        }
+                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.iconSource = "adwaita" }
                                     }
                                 }
                             }
                         }
-
-                        // 5. Phosphor Weight Variant
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card5Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: weightCol.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
                             ColumnLayout {
                                 id: weightCol
@@ -605,8 +631,9 @@ Item {
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Phosphor icon weight"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Thin, light, regular, bold, fill, or duotone"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Phosphor icon weight"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Thin, light, regular, bold, fill, or duotone"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 Flow {
@@ -615,12 +642,12 @@ Item {
 
                                     Repeater {
                                         model: [
-                                            { id: "thin", label: "Thin" },
-                                            { id: "light", label: "Light" },
-                                            { id: "regular", label: "Regular" },
-                                            { id: "bold", label: "Bold" },
-                                            { id: "fill", label: "Fill" },
-                                            { id: "duotone", label: "Duotone" }
+                                            { id: "thin", label: qsTr("Thin") },
+                                            { id: "light", label: qsTr("Light") },
+                                            { id: "regular", label: qsTr("Regular") },
+                                            { id: "bold", label: qsTr("Bold") },
+                                            { id: "fill", label: qsTr("Fill") },
+                                            { id: "duotone", label: qsTr("Duotone") }
                                         ]
 
                                         delegate: Item {
@@ -633,13 +660,13 @@ Item {
                                                 border.width: theme.phosphorWeight === modelData.id ? 2 : 0
 
                                                 scale: wMouse.pressed ? 0.94 : (wMouse.containsMouse ? 1.04 : 1.0)
-                                                Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                                                Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
 
                                                 Text {
                                                     anchors.centerIn: parent
                                                     text: modelData.label
                                                     color: theme.phosphorWeight === modelData.id ? theme.primaryContainerFg : theme.textMain
-                                                    font.pixelSize: 11
+                                                    font.pixelSize: theme.fs(11)
                                                     font.bold: theme.phosphorWeight === modelData.id
                                                 }
                                             }
@@ -656,10 +683,6 @@ Item {
                             }
                         }
                     }
-
-                    // ==========================================
-                    // TAB 1: BEHAVIOR
-                    // ==========================================
                     ColumnLayout {
                         id: tabBehavior
                         Layout.fillWidth: true
@@ -676,63 +699,35 @@ Item {
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
-                        Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                        Behavior on slideOffset { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         transform: Translate { y: tabBehavior.slideOffset }
-
-                        Rectangle {
-                            visible: settingsView.searchQuery.length === 0 || settingsView.motionMatch
-                            Layout.fillWidth: true
-                            implicitHeight: motionRow.implicitHeight + 32
-                            radius: theme.radiusL
-                            color: theme.surfaceContainer
-                            RowLayout {
-                                id: motionRow
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                spacing: 14
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Text { text: "Reduced motion"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Skip fades, springs and staggered transitions"; color: theme.textMuted; font.pixelSize: 11; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                                }
-                                SeabunnySwitch {
-                                    id: motionSwitch
-                                    objectName: "reducedMotionSwitch"
-                                    checked: theme.reducedMotion
-                                    onToggled: function(checked) { theme.reducedMotion = checked; }
-                                }
-                            }
-                            Connections {
-                                target: theme
-                                function onReducedMotionChanged() { motionSwitch.checked = theme.reducedMotion; }
-                            }
-                        }
-
-                        // Left-Click Drag Action
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card6Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: dragActionRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            ColumnLayout {
                                 id: dragActionRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                spacing: 12
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Left-click drag action"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Choose whether dragging selects items or pans the view"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Left-click drag action"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Choose whether dragging selects items or pans the view"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
-                                Item { Layout.fillWidth: true }
 
-                                RowLayout {
+                                Flow {
+                                    id: dragPills
+                                    Layout.fillWidth: true
                                     spacing: 8
 
                                     Item {
@@ -742,7 +737,7 @@ Item {
                                             color: theme.dragAction === "select" ? theme.primaryContainer : theme.surfaceContainerHigh
                                             border.color: theme.primary
                                             border.width: theme.dragAction === "select" ? 2 : 0
-                                            Text { anchors.centerIn: parent; text: "Selection Box"; color: theme.dragAction === "select" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: 11; font.bold: true }
+                                            Text { anchors.centerIn: parent; text: qsTr("Selection Box"); color: theme.dragAction === "select" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true }
                                         }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.dragAction = "select" }
                                     }
@@ -754,37 +749,40 @@ Item {
                                             color: theme.dragAction === "scroll" ? theme.primaryContainer : theme.surfaceContainerHigh
                                             border.color: theme.primary
                                             border.width: theme.dragAction === "scroll" ? 2 : 0
-                                            Text { anchors.centerIn: parent; text: "Pan View"; color: theme.dragAction === "scroll" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: 11; font.bold: true }
+                                            Text { anchors.centerIn: parent; text: qsTr("Pan View"); color: theme.dragAction === "scroll" ? theme.primaryContainerFg : theme.textMain; font.pixelSize: theme.fs(11); font.bold: true }
                                         }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: theme.dragAction = "scroll" }
                                     }
                                 }
                             }
                         }
-
-                        // Picture Thumbnails
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card7Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: thumbRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            GridLayout {
                                 id: thumbRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - thumbSwitch.implicitWidth) >= 170 ? 2 : 1
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Picture Thumbnails"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Show preview thumbnails for pictures, SVGs, and creative files"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Picture Thumbnails"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Show preview thumbnails for pictures, SVGs, and creative files"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 SeabunnySwitch {
                                     id: thumbSwitch
+                                    Layout.alignment: Qt.AlignRight
                                     checked: theme.showThumbnails
                                     onToggled: theme.showThumbnails = checked
                                 }
@@ -798,91 +796,211 @@ Item {
                                 }
                             }
                         }
-
-                        // Show Hidden Files
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card8Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: hiddenRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            GridLayout {
                                 id: hiddenRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - hiddenSwitch.implicitWidth) >= 170 ? 2 : 1
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Show Hidden Files"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Display files and folders starting with a dot"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Show Hidden Files"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Display files and folders starting with a dot"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 SeabunnySwitch {
                                     id: hiddenSwitch
-                                    checked: engine.show_hidden
-                                    onToggled: if (engine.show_hidden !== checked) engine.toggle_show_hidden()
+                                    Layout.alignment: Qt.AlignRight
+                                    checked: window.showHidden
+                                    onToggled: window.toggleShowHidden()
                                 }
                             }
 
                             Connections {
                                 target: engine
                                 function onShow_hiddenChanged() {
-                                    if (hiddenSwitch.checked !== engine.show_hidden)
-                                        hiddenSwitch.checked = engine.show_hidden
+                                    if (hiddenSwitch.checked !== window.showHidden)
+                                        hiddenSwitch.checked = window.showHidden
                                 }
                             }
                         }
-
-                        // Disambiguate duplicate names in search
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card9Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: disambigRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            GridLayout {
                                 id: disambigRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - disambigSwitch.implicitWidth) >= 170 ? 2 : 1
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Disambiguate duplicate names"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Show parent folder prefix for duplicate search results"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Disambiguate duplicate names"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Show parent folder prefix for duplicate search results"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 SeabunnySwitch {
                                     id: disambigSwitch
-                                    checked: engine.disambiguate_duplicates
-                                    onToggled: if (engine.disambiguate_duplicates !== checked) engine.toggle_disambiguate_duplicates()
+                                    Layout.alignment: Qt.AlignRight
+                                    checked: core.get_setting("disambiguate_duplicates") !== "false"
+                                    onToggled: core.set_setting("disambiguate_duplicates", checked ? "true" : "false")
                                 }
                             }
 
-                            Connections {
-                                target: engine
-                                function onDisambiguate_duplicatesChanged() {
-                                    if (disambigSwitch.checked !== engine.disambiguate_duplicates)
-                                        disambigSwitch.checked = engine.disambiguate_duplicates
+
+                        }
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card16Match
+                            title: qsTr("Restore last session")
+                            subtitle: qsTr("Reopen your tabs, folders and window size on start")
+                            SeabunnySwitch {
+                                checked: core.get_setting("restoreSession") !== "false"
+                                onToggled: function(c) { core.set_setting("restoreSession", c ? "true" : "false"); }
+                            }
+                        }
+
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card17Match
+                            title: qsTr("Click selected name to rename")
+                            subtitle: qsTr("A second single click on a selected item's name starts renaming (F2 always works)")
+                            SeabunnySwitch {
+                                checked: theme.clickToRename
+                                onToggled: function(c) { theme.clickToRename = c; }
+                            }
+                        }
+
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card18Match
+                            title: qsTr("Search inside files")
+                            subtitle: qsTr("Subfolder / everywhere searches also match text inside files (slower)")
+                            SeabunnySwitch {
+                                checked: theme.searchContents
+                                onToggled: function(c) { theme.searchContents = c; }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Navigation sidebar")
+                            subtitle: qsTr("Show, hide and reorder places, drives and bookmarks in the left rail")
+                            SeabunnyButton {
+                                text: qsTr("Customize Sidebar…")
+                                icon: "sliders-horizontal"
+                                variant: "tonal"
+                                onClicked: customizePlaces.open()
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Context menu layout")
+                            subtitle: qsTr("Minimal hides items with common shortcuts (Open, Cut, Copy, Delete, etc.)")
+                            RowLayout {
+                                spacing: 8
+                                SeabunnySegmented {
+                                    Layout.preferredWidth: 260
+                                    options: [
+                                        { value: "full", label: qsTr("Full") },
+                                        { value: "minimal", label: qsTr("Minimal") },
+                                        { value: "custom", label: qsTr("Custom") }
+                                    ]
+                                    value: theme.contextMenuMode
+                                    onSelected: function(v) {
+                                        theme.contextMenuMode = v;
+                                        if (v === "custom")
+                                            customizeContextMenuDialog.open();
+                                    }
+                                }
+                                SeabunnyButton {
+                                    visible: theme.contextMenuMode === "custom"
+                                    text: qsTr("Edit…")
+                                    icon: "sliders"
+                                    variant: "tonal"
+                                    onClicked: customizeContextMenuDialog.open()
                                 }
                             }
                         }
                     }
+                    ColumnLayout {
+                        id: tabAccessibility
+                        Layout.fillWidth: true
+                        spacing: 14
 
-                    // ==========================================
-                    // TAB 2: EXPERIMENTAL
-                    // ==========================================
+                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.accessibilityMatches > 0) : (settingsView.activeTab === 2)
+                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabAccessibility)
+                        property real slideOffset: shown ? 0 : 6
+
+                        Layout.topMargin: -fadeOverlap
+                        Layout.bottomMargin: fadeOverlap
+
+                        visible: shown || opacity > 0.001
+                        opacity: shown ? 1.0 : 0.0
+                        enabled: shown
+
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        transform: Translate { y: tabAccessibility.slideOffset }
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card13Match
+                            title: qsTr("Low-power mode")
+                            subtitle: (theme.softwareRendering || core.low_end_hardware)
+                                ? qsTr("This computer looks low-end (no GPU acceleration, little memory or few cores), so Auto keeps it on. Disables animations, thumbnail masks and background effects.")
+                                : qsTr("Disables animations, thumbnail masks and background effects for older or battery-powered machines")
+                            SeabunnySegmented {
+                                Layout.preferredWidth: 220
+                                options: [{ value: "auto", label: qsTr("Auto") }, { value: "on", label: qsTr("On") }, { value: "off", label: qsTr("Off") }]
+                                value: theme.lowPowerSetting
+                                onSelected: function(v) { theme.lowPowerSetting = v; }
+                            }
+                        }
+
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card14Match
+                            title: qsTr("Reduce motion")
+                            subtitle: qsTr("Turn off springs, fades and slide transitions")
+                            SeabunnySwitch {
+                                checked: theme.reduceMotionSetting
+                                onToggled: function(c) { theme.reduceMotionSetting = c; }
+                            }
+                        }
+
+                        SettingCard {
+                            visible: settingsView.searchQuery.length === 0 || settingsView.card15Match
+                            title: qsTr("Text size")
+                            subtitle: qsTr("Scales all text; also follows the desktop font size")
+                            SeabunnySegmented {
+                                Layout.preferredWidth: 260
+                                options: [{ value: 0.9, label: "90%" }, { value: 1.0, label: "100%" }, { value: 1.15, label: "115%" }, { value: 1.3, label: "130%" }]
+                                value: theme.fontScaleSetting
+                                onSelected: function(v) { theme.fontScaleSetting = v; }
+                            }
+                        }
+                    }
                     ColumnLayout {
                         id: tabExperimental
                         Layout.fillWidth: true
                         spacing: 14
 
-                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.experimentalMatches > 0) : (settingsView.activeTab === 2)
+                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.experimentalMatches > 0) : (settingsView.activeTab === 3)
                         readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabExperimental)
                         property real slideOffset: shown ? 0 : 6
 
@@ -893,32 +1011,74 @@ Item {
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
-                        Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                        Behavior on slideOffset { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         transform: Translate { y: tabExperimental.slideOffset }
-
-                        // Advanced Archive Formats
                         Rectangle {
                             Layout.fillWidth: true
-                            implicitHeight: expArchRow.implicitHeight + 32
+                            Layout.minimumWidth: 0
+                            implicitHeight: expIconRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
-                                id: expArchRow
+                            GridLayout {
+                                id: expIconRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - expIconSwitch.implicitWidth) >= 170 ? 2 : 1
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "Advanced Archive Formats"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Enable obscure archive formats (.7z, .tar.bz2, .tar.xz, .tar.zst, .cpio) in Compress menu"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("More icon styles"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Enable System desktop theme and GNOME Adwaita vector icons"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                }
+
+                                SeabunnySwitch {
+                                    id: expIconSwitch
+                                    Layout.alignment: Qt.AlignRight
+                                    checked: theme.showExperimentalIcons
+                                    onToggled: theme.showExperimentalIcons = checked
+                                }
+                            }
+
+                            Connections {
+                                target: theme
+                                function onShowExperimentalIconsChanged() {
+                                    if (expIconSwitch.checked !== theme.showExperimentalIcons)
+                                        expIconSwitch.checked = theme.showExperimentalIcons
+                                }
+                            }
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            implicitHeight: expArchRow.implicitHeight + 32
+                            radius: theme.radiusL
+                            color: theme.surfaceContainer
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
+
+                            GridLayout {
+                                id: expArchRow
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - expArchSwitch.implicitWidth) >= 170 ? 2 : 1
+
+                                ColumnLayout {
+                                    spacing: 3
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Advanced Archive Formats"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Enable obscure archive formats (.7z, .tar.bz2, .tar.xz, .tar.zst, .cpio) in Compress menu"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 SeabunnySwitch {
                                     id: expArchSwitch
+                                    Layout.alignment: Qt.AlignRight
                                     checked: theme.showAdvancedArchives
                                     onToggled: theme.showAdvancedArchives = checked
                                 }
@@ -932,30 +1092,33 @@ Item {
                                 }
                             }
                         }
-
-                        // PC Customization
                         Rectangle {
                             visible: settingsView.searchQuery.length === 0 || settingsView.card12Match
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: pcCustomRow.implicitHeight + 32
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                            RowLayout {
+                            GridLayout {
                                 id: pcCustomRow
                                 anchors.fill: parent
                                 anchors.margins: 16
-                                spacing: 14
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - pcCustomSwitch.implicitWidth) >= 170 ? 2 : 1
 
                                 ColumnLayout {
                                     spacing: 3
-                                    Text { text: "PC customization"; color: theme.textMain; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Allow reordering and hiding sections on the This PC dashboard"; color: theme.textMuted; font.pixelSize: 11 }
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("PC customization"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Allow reordering and hiding sections on the This PC dashboard"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                 }
 
                                 SeabunnySwitch {
                                     id: pcCustomSwitch
+                                    Layout.alignment: Qt.AlignRight
                                     checked: theme.experimentalPcCustomization
                                     onToggled: theme.experimentalPcCustomization = checked
                                 }
@@ -973,17 +1136,542 @@ Item {
                                 }
                             }
                         }
-                    }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            implicitHeight: expShareRow.implicitHeight + 32
+                            radius: theme.radiusL
+                            color: theme.surfaceContainer
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
-                    // ==========================================
-                    // TAB 3: ABOUT SEABUNNY
-                    // ==========================================
+                            GridLayout {
+                                id: expShareRow
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                columnSpacing: 14
+                                rowSpacing: 10
+                                columns: (width - 14 - shareViaLinkSwitch.implicitWidth) >= 170 ? 2 : 1
+
+                                ColumnLayout {
+                                    spacing: 3
+                                    Layout.fillWidth: true
+                                    Text { text: qsTr("Share via Link"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                    Text { text: qsTr("Enable direct link sharing using Cloudflare Tunnel and unlock the Share settings tab"); color: theme.textMuted; font.pixelSize: theme.fs(11); wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                                }
+
+                                SeabunnySwitch {
+                                    id: shareViaLinkSwitch
+                                    Layout.alignment: Qt.AlignRight
+                                    checked: theme.shareViaLinkEnabled
+                                    onToggled: {
+                                        theme.shareViaLinkEnabled = checked;
+                                        if (checked && typeof core !== "undefined" && core) {
+                                            if (!core.is_cloudflared_installed()) {
+                                                core.install_cloudflared();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Connections {
+                                target: theme
+                                function onShareViaLinkEnabledChanged() {
+                                    if (shareViaLinkSwitch.checked !== theme.shareViaLinkEnabled)
+                                        shareViaLinkSwitch.checked = theme.shareViaLinkEnabled
+                                }
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        id: tabShare
+                        Layout.fillWidth: true
+                        spacing: 14
+
+                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.shareMatches > 0) : (theme.shareViaLinkEnabled && settingsView.activeTab === 5)
+                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabShare)
+                        property real slideOffset: shown ? 0 : 6
+
+                        Layout.topMargin: -fadeOverlap
+                        Layout.bottomMargin: fadeOverlap
+
+                        visible: shown || opacity > 0.001
+                        opacity: shown ? 1.0 : 0.0
+                        enabled: shown
+
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        transform: Translate { y: tabShare.slideOffset }
+                        SettingCard {
+                            title: qsTr("Share Provider")
+                            subtitle: qsTr("Choose how files are hosted when sharing via link")
+
+                            RowLayout {
+                                spacing: 16
+
+                                SeabunnyRadio {
+                                    id: radioOwnMachine
+                                    text: qsTr("Own Machine")
+                                    checked: theme.shareProvider === "local"
+                                    onToggled: if (checked) theme.shareProvider = "local"
+                                }
+
+                                Item {
+                                    implicitWidth: radioCloud.implicitWidth
+                                    implicitHeight: radioCloud.implicitHeight
+
+                                    SeabunnyRadio {
+                                        id: radioCloud
+                                        text: qsTr("Seabunny Cloud")
+                                        enabled: false
+                                        opacity: 0.4
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        ToolTip.visible: containsMouse
+                                        ToolTip.text: qsTr("Coming Soon")
+                                        ToolTip.delay: 300
+                                    }
+                                }
+                            }
+                        }
+                        SettingCard {
+                            title: qsTr("Cloudflare Tunnel agent")
+                            subtitle: (typeof core !== "undefined" && core && core.cloudflared_ready)
+                                ? qsTr("The tunnel daemon (cloudflared) is installed and ready")
+                                : qsTr("Install cloudflared with your package manager to use link sharing")
+
+                            RowLayout {
+                                spacing: 10
+                                Rectangle {
+                                    height: 26
+                                    radius: theme.radiusFull
+                                    color: (typeof core !== "undefined" && core && core.cloudflared_ready)
+                                        ? theme.primaryContainer : theme.surfaceContainerHighest
+                                    width: tunnelStatusRow.implicitWidth + 18
+
+                                    RowLayout {
+                                        id: tunnelStatusRow
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        SeabunnyIcon {
+                                            name: (typeof core !== "undefined" && core && core.cloudflared_ready) ? "check-circle" : "arrow-circle-down"
+                                            size: 14
+                                            color: (typeof core !== "undefined" && core && core.cloudflared_ready) ? theme.primaryContainerFg : theme.textMuted
+                                        }
+                                        Text {
+                                            text: (typeof core !== "undefined" && core && core.cloudflared_ready) ? qsTr("Ready") : qsTr("Not installed")
+                                            color: (typeof core !== "undefined" && core && core.cloudflared_ready) ? theme.primaryContainerFg : theme.textMuted
+                                            font.pixelSize: theme.fs(11)
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+
+                                SeabunnyButton {
+                                    text: qsTr("Check cloudflared")
+                                    variant: "tonal"
+                                    icon: "arrows-clockwise"
+                                    onClicked: core.install_cloudflared()
+                                }
+                            }
+                        }
+                        SettingCard {
+                            title: qsTr("Compress folders")
+                            subtitle: qsTr("Automatically bundle folders into an archive before sharing")
+                            SeabunnySwitch {
+                                checked: theme.shareCompressFolders
+                                onToggled: function(c) { theme.shareCompressFolders = c; }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Compress single files")
+                            subtitle: qsTr("Compress individual files to minimize bandwidth and transfer size")
+                            SeabunnySwitch {
+                                checked: theme.shareCompressFiles
+                                onToggled: function(c) { theme.shareCompressFiles = c; }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Archive format")
+                            subtitle: qsTr("Compression format used for generated share archives")
+
+                            SeabunnySegmented {
+                                Layout.preferredWidth: 260
+                                options: [
+                                    { value: "zip", label: ".zip" },
+                                    { value: "7z", label: ".7z" },
+                                    { value: "tar.gz", label: ".tar.gz" }
+                                ]
+                                value: theme.shareCompressFormat
+                                onSelected: function(v) { theme.shareCompressFormat = v; }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Archive password")
+                            subtitle: qsTr("Optional password protection for created .zip or .7z archives")
+
+                            SeabunnyTextField {
+                                Layout.preferredWidth: 220
+                                echoMode: TextInput.Password
+                                placeholderText: qsTr("No password")
+                                text: theme.sharePassword
+                                onTextChanged: theme.sharePassword = text
+                            }
+                        }
+                        SettingCard {
+                            title: qsTr("Link expiration")
+                            subtitle: qsTr("Automatically shut down the stream and revoke the link after this period")
+
+                            SeabunnySegmented {
+                                Layout.preferredWidth: 320
+                                options: [
+                                    { value: 1, label: qsTr("1 Hour") },
+                                    { value: 6, label: qsTr("6 Hours") },
+                                    { value: 24, label: qsTr("24 Hours") },
+                                    { value: 0, label: qsTr("Never") }
+                                ]
+                                value: theme.shareExpirationHours
+                                onSelected: function(v) { theme.shareExpirationHours = v; }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("Bandwidth throttle")
+                            subtitle: qsTr("Limit upload rate to prevent file sharing from saturating your network")
+
+                            RowLayout {
+                                spacing: 8
+                                SeabunnyTextField {
+                                    Layout.preferredWidth: 130
+                                    placeholderText: qsTr("Unlimited")
+                                    text: theme.shareThrottleKbps > 0 ? theme.shareThrottleKbps.toString() : ""
+                                    onTextChanged: {
+                                        var val = parseInt(text) || 0;
+                                        theme.shareThrottleKbps = val;
+                                    }
+                                }
+                                Text {
+                                    text: "KB/s"
+                                    color: theme.textMuted
+                                    font.pixelSize: theme.fs(12)
+                                }
+                            }
+                        }
+                        Rectangle {
+                            id: activeSharesPanel
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            implicitHeight: activeSharesCol.implicitHeight + 32
+                            radius: theme.radiusL
+                            color: theme.surfaceContainer
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
+
+                            property var sharesList: []
+
+                            function refreshShares() {
+                                if (typeof core !== "undefined" && core) {
+                                    try {
+                                        sharesList = JSON.parse(core.list_shares_json() || "[]");
+                                    } catch (e) {
+                                        sharesList = [];
+                                    }
+                                }
+                            }
+
+                            Timer {
+                                interval: 2000
+                                running: tabShare.shown
+                                repeat: true
+                                triggeredOnStart: true
+                                onTriggered: activeSharesPanel.refreshShares()
+                            }
+
+                            ColumnLayout {
+                                id: activeSharesCol
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 14
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    ColumnLayout {
+                                        spacing: 3
+                                        Text { text: qsTr("Active Shares"); color: theme.textMain; font.pixelSize: theme.fs(14); font.bold: true }
+                                        Text { text: qsTr("Files currently being served from your machine"); color: theme.textMuted; font.pixelSize: theme.fs(11) }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    SeabunnyButton {
+                                        text: qsTr("Refresh")
+                                        icon: "arrow-clockwise"
+                                        variant: "tonal"
+                                        onClicked: activeSharesPanel.refreshShares()
+                                    }
+                                }
+
+                                Text {
+                                    visible: activeSharesPanel.sharesList.length === 0
+                                    text: qsTr("No active shares right now.")
+                                    color: theme.textMuted
+                                    font.pixelSize: theme.fs(12)
+                                    font.italic: true
+                                    Layout.topMargin: 4
+                                    Layout.bottomMargin: 4
+                                }
+
+                                Repeater {
+                                    model: activeSharesPanel.sharesList
+                                    delegate: Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: shareItemRow.implicitHeight + 20
+                                        radius: theme.radiusM
+                                        color: theme.surfaceContainerHigh
+                                        border.width: 1
+                                        border.color: theme.borderSubtle
+
+                                        RowLayout {
+                                            id: shareItemRow
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            spacing: 12
+
+                                            SeabunnyIcon {
+                                                name: modelData.is_archive ? "file-archive" : "file"
+                                                size: 24
+                                                color: theme.primary
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 3
+
+                                                RowLayout {
+                                                    spacing: 8
+                                                    Text {
+                                                        text: modelData.name
+                                                        color: theme.textMain
+                                                        font.pixelSize: theme.fs(13)
+                                                        font.bold: true
+                                                        elide: Text.ElideRight
+                                                    }
+                                                    Rectangle {
+                                                        radius: 4
+                                                        implicitWidth: stText.implicitWidth + 8
+                                                        implicitHeight: stText.implicitHeight + 4
+                                                        color: modelData.status === "ready" ? theme.primaryContainer : theme.surfaceContainerHighest
+                                                        Text {
+                                                            id: stText
+                                                            anchors.centerIn: parent
+                                                            text: modelData.status.toUpperCase()
+                                                            color: modelData.status === "ready" ? theme.primaryContainerFg : theme.textMuted
+                                                            font.pixelSize: theme.fs(9)
+                                                            font.bold: true
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    visible: modelData.url.length > 0
+                                                    text: modelData.url
+                                                    color: theme.primary
+                                                    font.pixelSize: theme.fs(11)
+                                                    elide: Text.ElideMiddle
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                Text {
+                                                    text: qsTr("Size: %1 · Downloads: %2 · Sent: %3")
+                                                        .arg(theme.formatBytes(modelData.size_bytes))
+                                                        .arg(modelData.download_count)
+                                                        .arg(theme.formatBytes(modelData.bytes_sent))
+                                                    color: theme.textMuted
+                                                    font.pixelSize: theme.fs(11)
+                                                }
+                                            }
+
+                                            SeabunnyButton {
+                                                text: qsTr("Copy Link")
+                                                icon: "copy"
+                                                variant: "outline"
+                                                visible: modelData.url.length > 0
+                                                onClicked: {
+                                                    native.setClipboardText(modelData.url);
+                                                    if (typeof window !== "undefined" && window.toast)
+                                                        window.toast("info", qsTr("Link copied to clipboard"));
+                                                }
+                                            }
+
+                                            SeabunnyButton {
+                                                text: qsTr("Stop")
+                                                icon: "stop"
+                                                variant: "danger"
+                                                visible: modelData.status === "ready" || modelData.status === "starting"
+                                                onClicked: {
+                                                    core.stop_share(modelData.id);
+                                                    activeSharesPanel.refreshShares();
+                                                }
+                                            }
+
+                                            SeabunnyButton {
+                                                text: qsTr("Remove")
+                                                icon: "trash"
+                                                variant: "ghost"
+                                                visible: modelData.status === "expired" || modelData.status === "error"
+                                                onClicked: {
+                                                    core.remove_share(modelData.id);
+                                                    activeSharesPanel.refreshShares();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        id: tabNetwork
+                        Layout.fillWidth: true
+                        spacing: 14
+
+                        readonly property var profiles: {
+                            try {
+                                return JSON.parse(core.smb_profiles_json || "[]");
+                            } catch (e) {
+                                return [];
+                            }
+                        }
+
+                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.networkMatches > 0) : (settingsView.activeTab === 6)
+                        readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabNetwork)
+                        property real slideOffset: shown ? 0 : 6
+
+                        Layout.topMargin: -fadeOverlap
+                        Layout.bottomMargin: fadeOverlap
+
+                        visible: shown || opacity > 0.001
+                        opacity: shown ? 1.0 : 0.0
+                        enabled: shown
+
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        transform: Translate { y: tabNetwork.slideOffset }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 10
+                            Text {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                text: qsTr("Saved SMB Shares")
+                                color: theme.textMain
+                                font.pixelSize: theme.fs(15)
+                                font.bold: true
+                            }
+                            SeabunnyButton {
+                                text: qsTr("Add Share")
+                                icon: "plus"
+                                variant: "filled"
+                                onClicked: window.openSmbEditor({})
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            visible: tabNetwork.profiles.length === 0
+                            wrapMode: Text.Wrap
+                            color: theme.textMuted
+                            font.pixelSize: theme.fs(12)
+                            text: qsTr("No shares saved yet. Add a server and share, then connect with your username and password. Connected shares appear in the sidebar and open like local folders.")
+                        }
+
+                        Repeater {
+                            model: tabNetwork.profiles
+
+                            delegate: Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                implicitHeight: shareRow.implicitHeight + 28
+                                radius: theme.radiusL
+                                color: theme.surfaceContainer
+
+                                RowLayout {
+                                    id: shareRow
+                                    anchors.fill: parent
+                                    anchors.margins: 14
+                                    spacing: 12
+                                    SeabunnyIcon {
+                                        name: modelData.connected ? "network" : "plug"
+                                        size: 20
+                                        color: modelData.connected ? theme.primary : theme.textMuted
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                        spacing: 2
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
+                                            text: modelData.label
+                                            color: theme.textMain
+                                            font.pixelSize: theme.fs(13)
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
+                                            text: (modelData.username ? modelData.username + "@" : "") + modelData.server + (modelData.share ? "/" + modelData.share : "")
+                                            color: theme.textMuted
+                                            font.pixelSize: theme.fs(11)
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+                                    SeabunnyButton {
+                                        text: modelData.connected ? qsTr("Disconnect") : qsTr("Connect")
+                                        icon: modelData.connected ? "plug-slash" : "plug"
+                                        variant: modelData.connected ? "tonal" : "filled"
+                                        onClicked: {
+                                            if (modelData.connected)
+                                                core.disconnect_smb(modelData.id);
+                                            else
+                                                core.connect_smb(modelData.id, "", false);
+                                        }
+                                    }
+                                    SeabunnyButton {
+                                        icon: "pencil-simple"
+                                        variant: "ghost"
+                                        Accessible.name: qsTr("Edit share")
+                                        onClicked: window.openSmbEditor(modelData)
+                                    }
+                                    SeabunnyButton {
+                                        icon: "trash"
+                                        variant: "ghost"
+                                        Accessible.name: qsTr("Remove share")
+                                        onClicked: window.removeSmbShare(modelData.id, modelData.label)
+                                    }
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            title: qsTr("SMB support")
+                            subtitle: qsTr("Shares are mounted with GVfs; passwords can be saved in the system keyring")
+                        }
+                    }
                     ColumnLayout {
                         id: tabAbout
                         Layout.fillWidth: true
                         spacing: 14
 
-                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.aboutMatches > 0) : (settingsView.activeTab === 3)
+                        readonly property bool shown: settingsView.searchQuery.length > 0 ? (settingsView.aboutMatches > 0) : (settingsView.activeTab === 4)
                         readonly property real fadeOverlap: settingsView.fadeOverlapAbove(tabAbout)
                         property real slideOffset: shown ? 0 : 6
 
@@ -994,16 +1682,17 @@ Item {
                         opacity: shown ? 1.0 : 0.0
                         enabled: shown
 
-                        Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                        Behavior on slideOffset { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                        Behavior on slideOffset { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                         transform: Translate { y: tabAbout.slideOffset }
 
                         Rectangle {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             implicitHeight: aboutRow.implicitHeight + 36
                             radius: theme.radiusL
                             color: theme.surfaceContainer
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
 
                             RowLayout {
                                 id: aboutRow
@@ -1014,24 +1703,24 @@ Item {
                                 Rectangle {
                                     width: 52; height: 52; radius: theme.radiusM
                                     color: theme.primaryContainer
-                                    SeabunnyLogo { anchors.centerIn: parent; size: 36; color: theme.primaryContainerFg }
+                                    SeabunnyLogo { anchors.centerIn: parent; size: 28; color: theme.primaryContainerFg }
                                 }
 
                                 ColumnLayout {
                                     spacing: 4
-                                    Text { text: "Seabunny v0.1.0"; color: theme.textMain; font.pixelSize: 16; font.bold: true }
-                                    Text { text: "A fast, expressive file manager for Linux."; color: theme.textMuted; font.pixelSize: 12 }
+                                    Text { text: qsTr("Seabunny v") + Qt.application.version; color: theme.textMain; font.pixelSize: theme.fs(16); font.bold: true }
+                                    Text { text: qsTr("A beautiful and fast Rust-based Material 3 Expressive file manager for Linux."); color: theme.textMuted; font.pixelSize: theme.fs(12) }
                                     RowLayout {
                                         spacing: 6
                                         SeabunnyIcon { name: "github-logo"; size: 14; color: theme.primary }
                                         Text {
                                             id: ghLink
-                                            text: "github.com/femgore/seabunny  ·  by @femgore"
+                                            text: qsTr("github.com/femgore/seabunny · upstream by m-uvex")
                                             color: ghMouse.containsMouse ? theme.primary : theme.outline
-                                            font.pixelSize: 11
+                                            font.pixelSize: theme.fs(11)
                                             font.underline: ghMouse.containsMouse
 
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(120)} }
+                                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: 120 } }
 
                                             MouseArea {
                                                 id: ghMouse
@@ -1047,6 +1736,55 @@ Item {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Settings row: title + subtitle on the left, a control on the right.
+    component SettingCard: Rectangle {
+        id: card
+        property string title: ""
+        property string subtitle: ""
+        default property alias control: controlSlot.data
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        implicitHeight: cardRow.implicitHeight + 32
+        radius: theme.radiusL
+        color: theme.surfaceContainer
+
+        GridLayout {
+            id: cardRow
+            anchors.fill: parent
+            anchors.margins: 16
+            columnSpacing: 14
+            rowSpacing: 10
+            // Two columns while the label still has room; otherwise the control
+            // moves below the text so it never gets pushed out of the card.
+            columns: (width - 14 - controlSlot.implicitWidth) >= 170 ? 2 : 1
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: 3
+                Text {
+                    text: card.title
+                    color: theme.textMain
+                    font.pixelSize: theme.fs(14)
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: card.subtitle
+                    color: theme.textMuted
+                    font.pixelSize: theme.fs(11)
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+            }
+            RowLayout {
+                id: controlSlot
+                Layout.alignment: cardRow.columns === 1 ? Qt.AlignRight : Qt.AlignVCenter
             }
         }
     }

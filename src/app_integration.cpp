@@ -13,6 +13,7 @@
 #include <QUrl>
 #include <QClipboard>
 #include <QMimeData>
+#include <QMimeDatabase>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -40,7 +41,7 @@ bool seabunny_ignorable_focus_warning(QtMsgType type, const QMessageLogContext &
 
 void configure_seabunny() {
     QCoreApplication::setApplicationName("Seabunny");
-    QCoreApplication::setApplicationVersion("0.1.0");
+    QCoreApplication::setApplicationVersion("0.2.0");
     QCoreApplication::setOrganizationDomain("github.com/femgore");
     QGuiApplication::setApplicationDisplayName("Seabunny");
     QGuiApplication::setDesktopFileName("org.femgore.Seabunny");
@@ -161,4 +162,18 @@ bool seabunny_save_sidebar_state(bool chooser, bool expanded, double width) {
         return false;
     }
     return true;
+}
+
+bool seabunny_matches_filter(const QString &path, const QString &rulesJson) {
+    const auto rules = QJsonDocument::fromJson(rulesJson.toUtf8()).array();
+    if (rules.isEmpty()) return true;
+    for (const auto &value : rules) {
+        const auto rule = value.toObject(); const auto pattern = rule.value("pattern").toString();
+        if (rule.value("kind").toInt() == 0 && QRegularExpression(QRegularExpression::wildcardToRegularExpression(pattern)).match(QFileInfo(path).fileName()).hasMatch()) return true;
+        if (rule.value("kind").toInt() == 1) {
+            const auto mime = QMimeDatabase().mimeTypeForFile(path, QMimeDatabase::MatchExtension);
+            if (mime.inherits(pattern) || (pattern.endsWith("/*") && mime.name().startsWith(pattern.left(pattern.size()-1)))) return true;
+        }
+    }
+    return false;
 }

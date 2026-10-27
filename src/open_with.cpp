@@ -160,6 +160,31 @@ QString seabunny_open_with(const QString &json, const QString &desktopId, bool m
     return failure;
 }
 
+QString seabunny_set_default_app(const QString &json, const QString &desktopId) {
+    const bool makeDefault = true;
+    const QStringList paths = pathsFromJson(json);
+    if (paths.isEmpty()) return "The selected items are no longer available.";
+    if (!desktopId.endsWith(".desktop") || desktopId.contains('/') || desktopId.contains('\\'))
+        return "Choose an installed application.";
+    const QString type = commonType(paths);
+    if (makeDefault && type.isEmpty()) return "Choose files of one type to set a default application.";
+    if (makeDefault && containsProgram(paths)) return "Programs run directly. Choose an application without setting a default.";
+    auto desktop = g_desktop_app_info_new(desktopId.toUtf8().constData());
+    if (!desktop) return "This application is no longer installed.";
+    GAppInfo *app = G_APP_INFO(desktop);
+    const bool foldersOnly = std::all_of(paths.begin(), paths.end(), [](const QString &path) { return QFileInfo(path).isDir(); });
+    if (!selectable(app, foldersOnly)) {
+        const QString message = isSeabunny(app) ? "Choose an application other than Seabunny to open this file."
+                                              : "This application cannot open files.";
+        g_object_unref(app);
+        return message;
+    }
+    GError *error = nullptr;
+    const bool saved = g_app_info_set_as_default_for_type(app, type.toUtf8().constData(), &error);
+    g_object_unref(app);
+    return saved ? QString() : errorText(error, "The default application could not be saved.");
+}
+
 QString seabunny_open_file(const QString &path) {
     const QFileInfo info(path);
     if (!info.isAbsolute() || !info.isFile()) return "This file is missing or unavailable.";

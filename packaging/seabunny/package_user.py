@@ -30,6 +30,7 @@ def build(with_portal=False):
         "org.femgore.Seabunny.svg": source / "org.femgore.Seabunny.svg",
         "README.md": source / "README.md",
         "ABOUT.md": repository / "README.md",
+        "NEXT-VERSION.md": repository / "NEXT-VERSION.md",
         "NOTICE.md": repository / "NOTICE.md",
     }
     if with_portal:
@@ -43,10 +44,10 @@ def build(with_portal=False):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(original, destination)
         destination.chmod(0o755 if relative in ("bin/seabunny", "bin/xdg-desktop-portal-seabunny", "seabunny.fish", "install-user.fish") else 0o644)
-    manifest = {"application": "Seabunny", "version": "0.1.0", "release": stamp,
+    manifest = {"application": "Seabunny", "version": "0.2.0", "release": stamp,
                 "files": {relative: checksum(output / relative) for relative in files}}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    archive_path = output.parent / ("seabunny-0.1.0-linux-x86_64-" + stamp + ".tar.gz")
+    archive_path = output.parent / ("seabunny-0.2.0-linux-x86_64-" + stamp + ".tar.gz")
     with tarfile.open(archive_path, "x:gz") as archive:
         archive.add(output, arcname="seabunny-" + stamp)
     (archive_path.parent / (archive_path.name + ".sha256")).write_text(checksum(archive_path) + "  " + archive_path.name + "\n")

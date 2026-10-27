@@ -80,9 +80,7 @@ Item {
     }
 
     opacity: root.isMounted ? 1.0 : 0.8
-    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(140)} }
-
-    // ---- surfaces -----------------------------------------------------------
+    Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 140 } }
 
     Rectangle {
         id: card
@@ -90,7 +88,7 @@ Item {
         radius: theme.radiusL
         color: theme.surfaceContainerLow
 
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
     }
 
     Rectangle {
@@ -99,7 +97,7 @@ Item {
         radius: theme.radiusL
         color: cardMouse.containsMouse ? theme.hoverOverlay : "transparent"
 
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(100)} }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: 100 } }
     }
 
     // Dashed outline for unmounted drives.
@@ -129,8 +127,6 @@ Item {
         }
     }
 
-    // ---- mounted content ----------------------------------------------------
-
     RowLayout {
         visible: root.isMounted
         anchors.fill: parent
@@ -151,7 +147,7 @@ Item {
             Text {
                 text: (root.drive && root.drive.name) ? root.drive.name : ""
                 color: theme.textMain
-                font.pixelSize: 14
+                font.pixelSize: theme.fs(14)
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -160,7 +156,7 @@ Item {
             Text {
                 text: root.secondaryText()
                 color: theme.textMuted
-                font.pixelSize: 12
+                font.pixelSize: theme.fs(12)
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
@@ -179,15 +175,13 @@ Item {
             Text {
                 text: root.formatBytes(root.usedBytes) + " used of " + root.formatBytes(root.totalBytes)
                 color: theme.textMuted
-                font.pixelSize: 11
+                font.pixelSize: theme.fs(11)
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignRight
                 Layout.fillWidth: true
             }
         }
     }
-
-    // ---- unmounted content --------------------------------------------------
 
     RowLayout {
         visible: !root.isMounted
@@ -210,7 +204,7 @@ Item {
             Text {
                 text: (root.drive && root.drive.name) ? root.drive.name : ""
                 color: theme.textMain
-                font.pixelSize: 14
+                font.pixelSize: theme.fs(14)
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -219,14 +213,12 @@ Item {
             Text {
                 text: (root.drive && root.drive.device) ? root.drive.device : ""
                 color: theme.textMuted
-                font.pixelSize: 12
+                font.pixelSize: theme.fs(12)
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
         }
     }
-
-    // ---- interaction --------------------------------------------------------
 
     // Sits above the content so the whole card is clickable; the Mount button
     // below is raised above this MouseArea so it keeps its own clicks.
@@ -252,7 +244,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: 14
         anchors.verticalCenter: parent.verticalCenter
-        text: "Mount"
+        text: qsTr("Mount")
         variant: "tonal"
         icon: "download-simple"
         onClicked: root.mountRequested()

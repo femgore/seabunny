@@ -2,6 +2,10 @@
 
 a file manager. for managing files. groundbreaking stuff.
 
+this branch is **seabunny 0.2.0**, rebuilt on the newer upstream architecture.
+the installed 0.1 build can stay put while this one gets tested.
+[what changed and how to try it](NEXT-VERSION.md).
+
 i wanted my folders to look nice and stuff so that became a rust + qt/qml project.
 there are tabs. there are thumbnails. the sidebar remembers where i left it.
 i've spent an unreasonable amount of time looking at little rectangles.
@@ -23,7 +27,8 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 
 ## things i put in here
 
-- grid and list views, tabs, search, and the keyboard shortcuts your hands already know
+- grid and list views, tabs, split view, recursive search, and the keyboard shortcuts your hands already know
+- background file operations with progress and cancellation, batch rename, and quick look
 - image and video thumbnails. the videos don't start playing every time you scroll past them
 - a sidebar you can resize and rearrange, with bookmarks and saved open/closed state
 - per-folder sorting. only folders with custom sorting need a saved entry
@@ -58,6 +63,9 @@ cargo build --release --locked
 ```
 
 folder paths, archives, and local file urls all work as arguments.
+
+for a separate development profile, use `fish ./run-development.fish` after building.
+it opens a new window without changing your installed app or portal routing.
 
 there isn't a published release or AUR package yet, so you'll need to build from
 source. the Nix recipe is here too, but it hasn't been verified for this snapshot.
@@ -106,25 +114,29 @@ recovery procedure.
 moving files around is the entire fucking job, so there are checks for that.
 
 ```fish
-cargo test --release --locked
+python3 -B tests/next/run_rust.py
 python3 -B tests/test_archives.py
 python3 -B tests/test_portal_install.py
-python3 -B tests/run_folder_sort_checks.py
-python3 -B tests/run_hotkey_checks.py
-python3 -B tests/run_clipboard_checks.py
-python3 -B tests/run_chooser_checks.py
-python3 -B tests/run_native_checks.py
+python3 -B tests/next/run_checks.py
+cmake -S tests -B /tmp/seabunny-qt-tests
+cmake --build /tmp/seabunny-qt-tests -j 2
+python3 -B tests/next/run_native.py --build-dir /tmp/seabunny-qt-tests
+python3 -B tests/next/run_wayland.py
 ```
 
-the UI checks run offscreen with temporary profiles. the portal guide covers the
-portal integration tests and native Qt tests.
+the new UI checks use temporary profiles. the Wayland clipboard check uses a
+private virtual KWin session, because borrowing your actual clipboard for a test
+would be annoying as hell. KWin and QtTest are test dependencies, not app requirements.
+the older 0.1 UI harnesses are kept for reference; use `tests/next` for this branch.
+[more test details and remaining limits](NEXT-VERSION.md).
 
-it's still early. archive editing and remote file browsing aren't supported,
-and some desktop-specific behavior needs checking outside my setup.
+it's still early. archive editing isn't supported. upstream's optional SMB and
+sharing features are present, but haven't been tested against a real server here.
+sharing needs an existing cloudflared installation; the app won't download one.
 
 bugs, suggestions, weird screenshots: all welcome. open an issue and tell me
 what you did, what happened, and what you expected. include your distro and desktop
-setup if it seems relevant. i use this thing too, so i'd quite like to fix it. suggestions are welcome too.
+setup if it seems relevant. i use this thing too, so i'd quite like to fix it.
 there's a decent chance the thing annoying you also annoys the shit out of me.
 
 [third-party notices and license status](NOTICE.md).

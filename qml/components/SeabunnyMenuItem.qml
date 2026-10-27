@@ -15,6 +15,8 @@ Item {
     transformOrigin: Item.Center
 
     property string icon: ""
+    // Image icon (e.g. an application's icon); takes precedence over `icon`.
+    property string iconUrl: ""
     property string text: ""
     property string shortcut: ""
     property bool danger: false
@@ -42,30 +44,31 @@ Item {
         property int delayMs: 0
 
         SequentialAnimation {
-            PauseAnimation { duration: theme.motionDuration(popAnim.delayMs)}
+            PauseAnimation { duration: popAnim.delayMs }
             ParallelAnimation {
                 NumberAnimation {
                     target: itemTranslate
                     property: "y"
-                    from: -8
+                    from: -10
                     to: 0
-                    duration: theme.motionDuration(160)
+                    duration: 200
                     easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
                     target: root
                     property: "scale"
-                    from: 0.96
+                    from: 0.90
                     to: 1.0
-                    duration: theme.motionDuration(160)
-                    easing.type: Easing.OutCubic
+                    duration: 220
+                    easing.type: Easing.OutBack
+                    easing.overshoot: 1.2
                 }
                 NumberAnimation {
                     target: root
                     property: "opacity"
                     from: 0.0
                     to: 1.0
-                    duration: theme.motionDuration(140)
+                    duration: 160
                     easing.type: Easing.OutCubic
                 }
             }
@@ -77,14 +80,14 @@ Item {
         property int delayMs: 0
 
         SequentialAnimation {
-            PauseAnimation { duration: theme.motionDuration(popOutAnim.delayMs)}
+            PauseAnimation { duration: popOutAnim.delayMs }
             ParallelAnimation {
                 NumberAnimation {
                     target: itemTranslate
                     property: "y"
                     from: 0
                     to: -4
-                    duration: theme.motionDuration(90)
+                    duration: 90
                     easing.type: Easing.InCubic
                 }
                 NumberAnimation {
@@ -92,7 +95,7 @@ Item {
                     property: "opacity"
                     from: 1.0
                     to: 0.0
-                    duration: theme.motionDuration(90)
+                    duration: 90
                     easing.type: Easing.InCubic
                 }
             }
@@ -102,8 +105,8 @@ Item {
     function popIn(delayMs) {
         popOutAnim.stop();
         popAnim.stop();
-        itemTranslate.y = -8;
-        root.scale = 0.96;
+        itemTranslate.y = -10;
+        root.scale = 0.90;
         root.opacity = 0.0;
         popAnim.delayMs = delayMs || 0;
         popAnim.start();
@@ -138,7 +141,7 @@ Item {
             ? (root.danger ? theme.dangerContainer : theme.menuItemHover)
             : "transparent"
 
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(100)} }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: 100 } }
     }
 
     RowLayout {
@@ -149,16 +152,29 @@ Item {
         opacity: root.enabled ? 1.0 : 0.45
 
         SeabunnyIcon {
-            visible: root.icon.length > 0
+            visible: root.icon.length > 0 && root.iconUrl.length === 0
             name: root.icon
             size: 16
             color: root.danger ? theme.danger : theme.textMain
+            scale: itemMouse.containsMouse ? 1.12 : 1.0
+            Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 4.5; damping: 0.3 } }
+        }
+
+        Image {
+            visible: root.iconUrl.length > 0
+            source: root.iconUrl
+            Layout.preferredWidth: 16
+            Layout.preferredHeight: 16
+            sourceSize.width: 32
+            sourceSize.height: 32
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
         }
 
         Text {
             text: root.text
             color: root.danger ? theme.danger : theme.textMain
-            font.pixelSize: 13
+            font.pixelSize: theme.fs(13)
             Layout.fillWidth: true
             elide: Text.ElideRight
         }
@@ -181,7 +197,7 @@ Item {
             visible: root.showTrailingShortcut
             text: root.shortcut
             color: theme.outline
-            font.pixelSize: 11
+            font.pixelSize: theme.fs(11)
         }
     }
 

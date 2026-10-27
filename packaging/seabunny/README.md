@@ -56,8 +56,9 @@ preferences and favorites go in `$XDG_CONFIG_HOME/seabunny`, normally
 under `$XDG_STATE_HOME/seabunny`. sorting preferences are shared, and only folders
 with non-default sorting get an entry.
 
-installation doesn't import or overwrite existing settings. thumbnails and archive
-previews use seabunny's own cache paths.
+installation doesn't overwrite existing settings. compatible favorites, tabs and
+sidebar preferences are read when the app starts. thumbnails now use the standard
+shared desktop thumbnail cache; archive previews use private temporary paths.
 
 ## the colors and the other window
 

@@ -20,7 +20,7 @@ IFACE = "org.freedesktop.impl.portal.FileChooser"
 
 def inner():
     from gi.repository import Gio, GLib
-    subprocess.run([str(ROOT / "target/seabunny-qt-tests/portal-tests")],
+    subprocess.run([os.environ.get("SEABUNNY_PORTAL_TESTS", str(ROOT / "target/seabunny-qt-tests/portal-tests"))],
         env=dict(os.environ, SEABUNNY_PRIVATE_BUS_TEST="1"), check=True, timeout=20)
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     def call(path, interface, method, args=None, signature=None):

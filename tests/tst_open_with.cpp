@@ -46,6 +46,13 @@ private slots:
         write(directory + "org.femgore.Seabunny.desktop", ("[Desktop Entry]\nType=Application\nName=Seabunny\nExec=\""
             + recorder + "\" seabunny %F\nMimeType=text/plain;application/pdf;\n").toUtf8());
     }
+    void savesDefaultWithoutLaunching() {
+        const auto before = read(receipt);
+        QCOMPARE(seabunny_set_default_app(paths({first}), "one.desktop"), QString());
+        QCOMPARE(read(receipt), before);
+        QVERIFY(!seabunny_set_default_app(paths({first}), "org.femgore.Seabunny.desktop").isEmpty());
+        QCOMPARE(read(receipt), before);
+    }
     void listsInstalledApplicationsAndTypes() {
         const auto result = apps({first});
         QCOMPARE(result["mimeType"].toString(), "text/plain");

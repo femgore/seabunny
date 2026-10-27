@@ -1,38 +1,124 @@
-pub mod bridge;
-mod favorites;
-mod folder_sort;
-mod permissions;
-mod archive;
+pub mod merge;
+pub mod favorites;
+pub mod integration;
+pub mod folder_sort;
+pub mod permissions;
+pub mod apps;
+pub mod archive_reader;
+pub mod archive;
+pub mod core;
+pub mod drives;
+pub mod fsops;
+pub mod icons;
+pub mod info;
+pub mod listing;
+pub mod native;
+pub mod pane;
+pub mod search;
+pub mod share;
+pub mod smb;
+pub mod state;
+pub mod theme;
+pub mod trash;
+pub mod util;
+pub mod watcher;
+pub mod xdg;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
-fn main() {
-    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    if arguments == ["--version"] {
-        println!("Seabunny {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-    if arguments == ["--help"] || arguments == ["-h"] {
-        println!("Seabunny — file manager\nUsage: seabunny [FOLDER|ARCHIVE|FILE-URI]...\n\n--version  Show version\n--help     Show this help");
-        return;
-    }
-    let mut app = QGuiApplication::new();
-    bridge::qobject::configure_seabunny();
-    let mut engine = QQmlApplicationEngine::new();
+const HELP: &str = "Seabunny - a Material 3 file manager
 
-    // Allow loading QML from the source tree during development:
-    //   SEABUNNY_QML=/path/to/main.qml target/debug/seabunny
-    // Falls back to the compiled-in qrc resource for normal runs.
+Usage: seabunny [OPTIONS] [PATH...]
+
+Opens each PATH (a folder, a file to show in its folder, or a file:// URI)
+in a tab. Without --new-window the paths are handed to a running Seabunny.
+
+Options:
+  -p, --path <DIR>   Start in DIR
+  -m, --mini         Start in the compact (mini) layout
+      --new-window   Always open a separate window
+  -v, --verbose      Print diagnostic messages
+      --version      Print the version and exit
+  -h, --help         Print this help and exit
+";
+
+struct Args {
+    paths: Vec<String>,
+    mini: bool,
+    new_window: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut out = Args { paths: Vec::new(), mini: false, new_window: false };
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-h" | "--help" => {
+                print!("{}", HELP);
+                std::process::exit(0);
+            }
+            "--version" => {
+                println!("seabunny {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            "-v" | "--verbose" => std::env::set_var("SEABUNNY_VERBOSE", "1"),
+            "-m" | "--mini" => out.mini = true,
+            "--new-window" => out.new_window = true,
+            "-p" | "--path" => out.paths.push(it.next().ok_or("--path needs a folder")?),
+            "--" => out.paths.extend(it.by_ref()),
+            s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option '{}' (see --help)", s)),
+            s => out.paths.push(s.to_string()),
+        }
+    }
+    // Relative paths are relative to where seabunny was started.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| util::home());
+    out.paths = out
+        .paths
+        .into_iter()
+        .map(|p| {
+            if p.starts_with("file://") || p.starts_with('/') {
+                p
+            } else {
+                cwd.join(p).to_string_lossy().to_string()
+            }
+        })
+        .collect();
+    Ok(out)
+}
+
+fn main() {
+    let args = match parse_args() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("seabunny: {}", e);
+            std::process::exit(2);
+        }
+    };
+    let mut app = QGuiApplication::new();
+    native::ffi::set_application_identity(env!("CARGO_PKG_VERSION"));
+    integration::ffi::configure_seabunny();
+    let admin = std::env::var("SEABUNNY_ADMIN").is_ok();
+    if !args.new_window && !admin {
+        let mode = if args.paths.is_empty() { "window" } else { "tab" };
+        if native::ffi::forward_to_running_instance(&args.paths, mode) {
+            return;
+        }
+    }
+    let mut engine = QQmlApplicationEngine::new();
     let url = match std::env::var("SEABUNNY_QML") {
         Ok(path) if !path.is_empty() => QUrl::from(&format!("file://{path}")),
         _ => QUrl::from("qrc:/qt/qml/app/seabunny/qml/main.qml"),
     };
-
+    let mode = match (args.mini, args.new_window || admin) {
+        (true, true) => "mini,new-window",
+        (true, false) => "mini",
+        (false, true) => "tab,new-window",
+        (false, false) => "tab",
+    };
     if let Some(mut engine) = engine.as_mut() {
-        bridge::qobject::install_thumbnail_provider(engine.as_mut());
+        native::ffi::setup_engine(engine.as_mut(), &args.paths, mode);
         engine.load(&url);
     }
-
     if let Some(app) = app.as_mut() {
         app.exec();
     }

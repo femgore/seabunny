@@ -58,15 +58,13 @@ from the checkout, in fish:
 
 ```fish
 cargo build --release --locked
-cmake -S tests -B target/seabunny-qt-tests
-cmake --build target/seabunny-qt-tests -j 2
-env QT_QPA_PLATFORM=offscreen SEABUNNY_PRIVATE_BUS_TEST=1 dbus-run-session -- target/seabunny-qt-tests/portal-tests
-python3 -B tests/run_chooser_checks.py
-python3 -B tests/run_sidebar_persistence.py
-python3 -B tests/run_native_checks.py
+cmake -S tests -B /tmp/seabunny-qt-tests
+cmake --build /tmp/seabunny-qt-tests -j 2
+python3 -B tests/next/run_native.py --build-dir /tmp/seabunny-qt-tests
+python3 -B tests/next/run_checks.py
 python3 -B tests/test_portal_install.py
-/usr/bin/python3 -B tests/test_portal_bus.py
-/usr/bin/python3 -B tests/test_portal_bus.py --helium
+env SEABUNNY_PORTAL_TESTS=/tmp/seabunny-qt-tests/portal-tests /usr/bin/python3 -B tests/test_portal_bus.py
+env SEABUNNY_PORTAL_TESTS=/tmp/seabunny-qt-tests/portal-tests /usr/bin/python3 -B tests/test_portal_bus.py --helium
 ```
 
 the UI checks run offscreen. the integration test makes its own private bus,

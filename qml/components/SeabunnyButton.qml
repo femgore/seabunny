@@ -11,6 +11,8 @@ Item {
     property string icon: ""
     property string variant: "text"
     property bool checked: false
+    property string accessibleName: ""
+    Accessible.name: accessibleName.length > 0 ? accessibleName : (text.length > 0 ? text : icon)
 
     signal clicked()
 
@@ -25,7 +27,7 @@ Item {
     transformOrigin: Item.Center
     scale: mouse.pressed ? 0.95 : 1.0
 
-    Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 4.0; damping: 0.3 } }
+    Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 4.0; damping: 0.3 } }
 
     readonly property color bgColor: {
         switch (variant) {
@@ -42,7 +44,7 @@ Item {
         switch (variant) {
         case "filled": return theme.primaryFg;
         case "tonal": return theme.secondaryContainerFg;
-        case "danger": return theme.dangerFg;
+        case "danger": return theme.danger;
         default: return theme.textMain;
         }
     }
@@ -77,7 +79,7 @@ Item {
         border.width: root.variant === "outlined" ? 1 : 0
         border.color: theme.outline
 
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(120)} }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: 120 } }
     }
 
     RowLayout {
@@ -96,7 +98,7 @@ Item {
             visible: root.text.length > 0
             text: root.text
             color: root.fgColor
-            font.pixelSize: 13
+            font.pixelSize: theme.fs(13)
             font.bold: root.variant === "filled" || root.variant === "tonal"
         }
     }

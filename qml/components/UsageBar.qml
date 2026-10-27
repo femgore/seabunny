@@ -22,7 +22,7 @@ Item {
         radius: height / 2
         color: root.trackColor
 
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
     }
 
     Rectangle {
@@ -31,7 +31,7 @@ Item {
         color: root.barColor
         width: parent.width * root.clampedValue
 
-        Behavior on width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(260); easing.type: Easing.OutCubic } }
-        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+        Behavior on width { enabled: theme.animate; NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
     }
 }

@@ -8,12 +8,16 @@ so neither of us has to guess.
 
 | shortcut | what it does |
 | --- | --- |
-| F2 | rename the one selected item |
+| F2 | rename one item, or batch rename several |
 | Delete | move selected items to trash |
+| Shift+Delete | permanently delete after confirmation |
 | Ctrl+C / Ctrl+X / Ctrl+V | copy / cut / paste |
 | Ctrl+Z | undo a file operation |
 | Ctrl+Shift+Z / Ctrl+Y | redo a file operation |
 | Ctrl+A | select everything in the current view |
+| Ctrl+Shift+I | invert selection |
+| Ctrl+S | select by filename pattern |
+| Space | quick look |
 | Ctrl+Shift+N | make a folder |
 | Ctrl+F | focus search and select its text |
 | Ctrl+L | edit the location |
@@ -26,6 +30,11 @@ so neither of us has to guess.
 | Backspace | go back while browsing files |
 | Ctrl+1 / Ctrl+2 | grid / list view |
 | F9 | expand / collapse the sidebar |
+| F3 | toggle split view |
+| Ctrl+N | open a new window |
+| Ctrl+D | bookmark this folder |
+| Ctrl+Shift+C | copy selected paths |
+| Ctrl++ / Ctrl+- / Ctrl+0 | zoom in / out / reset |
 | Arrow keys / Shift+arrows | move through files / extend the selection |
 | Enter | open the selected item |
 | Ctrl+T / Ctrl+W | open / close a tab |
@@ -50,7 +59,8 @@ the file picker keeps the browsing shortcuts, but blocks things like rename,
 trash, paste, and file undo. enter accepts or opens things as appropriate, and
 escape cancels. archives stay read-only.
 
-delete goes through trash and can be undone. there's no permanent-delete shortcut.
+delete goes through trash and can be undone. shift+delete asks before permanently
+deleting; that one doesn't get an undo.
 undo exists because sometimes the previous decision was shit.
 
 ## familiar for a reason

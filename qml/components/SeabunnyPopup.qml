@@ -26,22 +26,26 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-    transformOrigin: Item.TopLeft
-    scale: 1.0
+    transformOrigin: Item.Center
+    scale: 0.85
     opacity: 0.0
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: theme.motionDuration(110); easing.type: Easing.OutCubic }
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 220; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 0.8; to: 1.0; duration: 240; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+        }
     }
 
     exit: Transition {
-        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: theme.motionDuration(90); easing.type: Easing.InCubic }
+        ParallelAnimation {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 160; easing.type: Easing.InCubic }
+            NumberAnimation { property: "scale"; from: 1.0; to: 0.85; duration: 160; easing.type: Easing.InCubic }
+        }
     }
 
     background: Item {
         id: bgItem
-
-        // Subtle soft shadow underneath the popup card
         Rectangle {
             anchors.fill: parent
             anchors.topMargin: 3
@@ -50,8 +54,6 @@ Popup {
             color: "#000000"
             opacity: theme.isDark ? 0.35 : 0.12
         }
-
-        // Main rounded card
         Rectangle {
             id: surfaceRect
             anchors.fill: parent
@@ -60,8 +62,8 @@ Popup {
             border.color: popup.borderColor
             border.width: 1
 
-            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
-            Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
+            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
+            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationNormal } }
         }
     }
 
@@ -75,8 +77,6 @@ Popup {
 
     // True while the pointer is over the popup content (used for submenu lifetime).
     property alias contentHovered: contentHoverHandler.hovered
-
-    // ---- positioning helpers ------------------------------------------------
 
     function winWidth() {
         if (typeof window !== "undefined" && window && window.width > 0) return window.width;

@@ -1,9 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Effects
 import app.seabunny
-import "Sidebar.js" as Sidebar
 
 ApplicationWindow {
     id: window
@@ -15,7 +13,8 @@ ApplicationWindow {
     property string chooserNameBase: ""
     property string chooserGeneratedName: ""
     onChooserFilterChanged: {
-        gridContainer.clearSelection(); gridContainer.reloadItems();
+        if (activePane) activePane.clearSelection();
+        if (chooserMode && engine) engine.configure_chooser(chooser.config.directory, chooser.filterRules(chooserFilter));
         if (chooserMode) Qt.callLater(window.updateChooserName);
     }
 
@@ -27,11 +26,7 @@ ApplicationWindow {
         chooserName.text = chooserGeneratedName;
     }
 
-    function chooserPaths() {
-        return gridContainer.getSelectedItems().map(function(item) {
-            return engine.is_searching_everywhere ? item.path : engine.current_path + "/" + item.name;
-        });
-    }
+    function chooserPaths() { return activePane ? activePane.selectedPaths() : []; }
     function acceptChooser(overwrite) {
         if (!chooserMode) return;
         updateChooserName();
@@ -41,7 +36,7 @@ ApplicationWindow {
         if (result.overwrite) { overwritePath.text = result.path; chooserOverwrite.open(); }
     }
     function activateFile(path) {
-        if (!chooserMode) { engine.open_item(path); return; }
+        if (!chooserMode) { core.open_item(path); return; }
         if (chooser.config.save) chooserName.text = path.split("/").pop();
         acceptChooser(false);
     }
@@ -185,377 +180,672 @@ ApplicationWindow {
     }
     width: 1080
     height: 720
-    minimumWidth: 760
-    minimumHeight: 500
-    visible: !chooserMode
-    title: chooserMode ? chooser.config.title : "Seabunny - " + (activeView === "settings"
-        ? ("Settings - " + (settingsView ? (settingsView.activeTab === 0 ? "Interface" : (settingsView.activeTab === 1 ? "Behavior" : (settingsView.activeTab === 2 ? "Experimental" : "About Seabunny"))) : "Settings"))
-        : activeView === "pc" ? (engine.hostname || "This PC")
-        : (engine.is_searching_everywhere ? "Searching Everywhere" : engine.current_dir_name))
+    minimumWidth: 640
+    minimumHeight: 420
+    visible: true
+    title: chooserMode ? chooser.config.title : (native.isAdmin ? qsTr("[Administrator] ") : "") + "Seabunny - " + (activeView === "settings"
+        ? qsTr("Settings")
+        : activeView === "pc" ? (core.hostname || qsTr("This PC"))
+        : (engine.is_searching_everywhere ? qsTr("Search") : engine.current_dir_name))
     color: theme.background
-    font.family: theme.fontFamily
 
-    TapHandler {
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onPressedChanged: {
-            if (!pressed || !searchInput.activeFocus) return;
-            var position = searchInput.mapFromItem(parent, point.position.x, point.position.y);
-            if (position.x < 0 || position.y < 0 || position.x > searchInput.width || position.y > searchInput.height)
-                globalKeyHandler.forceActiveFocus();
-        }
-    }
-
-    readonly property var initialSidebarState: JSON.parse(preferencesEngine.sidebar_state(chooserMode) || "{}")
-    property bool sidebarReady: false
-    property bool sidebarExpanded: initialSidebarState.expanded === true
-    property real expandedSidebarWidth: Math.max(180, Math.min(520,
-        Number(initialSidebarState.width) || Number(preferencesEngine.get_setting("sidebarWidth")) || 300))
-    property bool resizingSidebar: false
-    readonly property real maximumSidebarWidth: Math.max(180, Math.min(520, width - 380))
-    onSidebarExpandedChanged: saveSidebarState()
-
-    function saveSidebarState() {
-        if (sidebarReady)
-            preferencesEngine.save_sidebar_state(chooserMode, sidebarExpanded, expandedSidebarWidth);
-    }
-
-    function resizeSidebar(value) {
-        expandedSidebarWidth = Math.max(180, Math.min(maximumSidebarWidth, value));
-    }
-    function saveSidebarWidth() {
-        if (!chooserMode) preferencesEngine.set_setting("sidebarWidth", String(expandedSidebarWidth));
-        saveSidebarState();
-    }
-
-    MouseArea {
-        id: sidebarResizeHandle
-        objectName: "sidebarResizeHandle"
-        parent: navRailRect
-        x: parent.width - width
-        y: 0
-        width: 8
-        height: navRailRect.height
-        z: 100
-        visible: window.sidebarExpanded
-        hoverEnabled: true
-        cursorShape: Qt.SplitHCursor
-        property real startX: 0
-        property real startWidth: 0
-        onPressed: function(mouse) {
-            startX = mapToItem(window.contentItem, mouse.x, mouse.y).x;
-            startWidth = navRailRect.width;
-            window.resizingSidebar = true;
-            theme.finishAnimations(navRailRect);
-        }
-        onPositionChanged: function(mouse) {
-            if (pressed) window.resizeSidebar(startWidth + mapToItem(window.contentItem, mouse.x, mouse.y).x - startX);
-        }
-        onReleased: { window.saveSidebarWidth(); window.resizingSidebar = false; }
-        onCanceled: { window.saveSidebarWidth(); window.resizingSidebar = false; }
-        onDoubleClicked: { window.resizeSidebar(300); window.saveSidebarWidth(); }
-        Rectangle {
-            objectName: "sidebarResizeNotch"
-            anchors.centerIn: parent
-            width: 3
-            height: 30
-            radius: 1.5
-            color: parent.containsMouse || parent.pressed ? theme.primary : theme.outline
-            opacity: parent.containsMouse || parent.pressed ? 1 : 0.5
-        }
-    }
-    property string activeView: "files" // "files", "settings", or "pc"
-    property int currentNavIndex: 1      // nav rows: 0 = PC, 1 = Home, ...
-    property int currentPlaceIndex: 1    // last clicked place row (pill position when in files view)
-    property real gridItemSize: Math.max(88, Math.min(420, Number(engine.get_setting("gridItemSize")) || 220))
-    onGridItemSizeChanged: engine.set_setting("gridItemSize", String(gridItemSize))
-    readonly property var cutPaths: JSON.parse(engine.clipboard_cut_paths_json || "[]")
-    property var favoriteItems: JSON.parse(engine.favorites_json())
-    property var sidebarLayout: Sidebar.layout(engine.get_setting("sidebarLayout"))
-
-    function saveSidebarLayout(value) {
-        sidebarLayout = value;
-        engine.set_setting("sidebarLayout", JSON.stringify(value));
-        Qt.callLater(window.syncPlaces);
-    }
-
-    function reorderSidebar(source, target, before) {
-        if (chooserMode) return;
-        saveSidebarLayout(Sidebar.move(sidebarLayout, navRepeater.model, source, target, before));
-    }
-
-    function removeSidebar(item) {
-        if (chooserMode) return;
-        if (item.favorite) { saveFavorite(item.path, "", true); return; }
-        var value = Sidebar.layout(JSON.stringify(sidebarLayout));
-        if (value.hidden.indexOf(item.id) < 0) value.hidden.push(item.id);
-        saveSidebarLayout(value);
-    }
-
-    function sidebarPath(item) {
-        if (item.view === "pc" || item.trashRoot) return "";
-        return item.path || engine.place_path(item.pathSuffix || "");
-    }
-
-    function pinSidebarPaths(paths, target, before) {
-        var pinned = false;
-        paths.forEach(function(path) {
-            if (!JSON.parse(engine.get_item_info(path)).is_dir) return;
-            if (window.saveFavorite(path, path.split("/").filter(Boolean).pop() || "Home", false)) {
-                pinned = true;
-                var favorite = window.favoriteItems.filter(function(item) { return item.path === path; })[0];
-                if (favorite && target) window.reorderSidebar("folder:" + favorite.path, target, before);
-            }
-        });
-        return pinned;
-    }
-
-    function dropOnSidebar(drop, item, edge) {
-        if (chooserMode) return;
-        drop.accepted = false;
-        if (drop.source === sidebarDragProxy) {
-            var source = sidebarDragProxy.sidebarId;
-            Qt.callLater(function() { window.reorderSidebar(source, item ? item.id : "", edge !== "after"); });
-            drop.accept(Qt.MoveAction);
-            return;
-        }
-        var paths = drop.source === dragProxy ? dragManager.paths.slice() : Sidebar.localPaths(drop.urls || []);
-        if (!paths.length) return;
-        dragManager.hoverTarget = "";
-        if (!item || edge) {
-            if (pinSidebarPaths(paths, item ? item.id : "", edge !== "after")) drop.accept(Qt.CopyAction);
-            return;
-        }
-        var target = sidebarPath(item);
-        if (!target || !JSON.parse(engine.get_item_info(target)).is_dir) return;
-        var asCopy = drop.source === dragProxy ? dragManager.asCopy
-            : !!(drop.modifiers & Qt.ControlModifier) || !(drop.supportedActions & Qt.MoveAction);
-        drop.accept(asCopy ? Qt.CopyAction : Qt.MoveAction);
-        handleDrop(paths, target, asCopy);
-    }
-
-    function saveFavorite(path, label, remove) {
-        if (!engine.update_favorite(path, label, remove)) return false;
-        favoriteItems = JSON.parse(engine.favorites_json());
-        syncPlaces();
-        return true;
-    }
-
-    function isFavorite(path) {
-        return favoriteItems.some(function(item) { return item.path === path; });
-    }
-
-    function zoomGrid(event) {
-        if (!(event.modifiers & Qt.ControlModifier)) return false;
-        var delta = event.angleDelta.y || event.pixelDelta.y;
-        if (!delta) return false;
-        var availableWidth = filesGridView.width;
-        if (availableWidth <= 0 || engine.view_mode !== "grid") return false;
-        cancelTabRestore();
-        var minimumColumns = Math.max(1, Math.floor(availableWidth / 420 + 0.000001));
-        var maximumColumns = Math.max(1, Math.floor(availableWidth / 88 + 0.000001));
-        var columns = Math.max(minimumColumns, Math.min(maximumColumns, filesGridView.cols + (delta > 0 ? -1 : 1)));
-        gridItemSize = delta > 0 && columns === minimumColumns ? 420
-            : delta < 0 && columns === maximumColumns ? 88
-            : Math.max(88, Math.min(420, availableWidth / columns));
-        event.accepted = true;
-        return true;
-    }
-
-    function syncPlaces() {
-        if (!navRepeater.model) return;
-        if (window.activeView === "pc") {
-            window.currentNavIndex = navRepeater.model.findIndex(function(item) { return item.view === "pc"; });
-        }
-        var best = -1;
-        var longest = -1;
-        for (var index = 0; index < navRepeater.model.length; index++) {
-            var place = navRepeater.model[index];
-            if (place.view === "pc") continue;
-            var target = place.path || (place.trashRoot ? engine.trash_root : engine.place_path(place.pathSuffix || ""));
-            if ((engine.current_path === target || engine.current_path.indexOf(target + "/") === 0) && target.length > longest) {
-                best = index;
-                longest = target.length;
-            }
-        }
-        window.currentPlaceIndex = best;
-        if (window.activeView === "files") window.currentNavIndex = best;
-    }
+    // Mirror the whole layout for right-to-left languages.
+    LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+    LayoutMirroring.childrenInherit: true
+    property string activeView: "files" // "files", "settings", "pc"
     property bool isEditingPath: false
+    property bool keyboardNavActive: false
+    property bool splitView: false
+    readonly property bool showHidden: activePane ? activePane.engine.show_hidden : false
 
-    // Views that show the back button and aren't the file grid (back returns to files)
+    function toggleShowHidden() {
+        var v = !pane0.engine.show_hidden;
+        if (pane0.engine.show_hidden !== v)
+            pane0.engine.toggle_show_hidden();
+        if (pane1Loader.item && pane1Loader.item.engine.show_hidden !== v)
+            pane1Loader.item.engine.toggle_show_hidden();
+    }
+    property var activePane: pane0
+    // The engine (model) of the pane the user is working in.
+    readonly property var engine: activePane ? activePane.engine : pane0.engine
+    property string searchScope: "folder"
+
+    // Tabs: [{ states: [json, json], split: bool, active: 0|1, title }]
+    property var tabs: [{ states: ["", ""], split: false, active: 0, title: "" }]
+    property int currentTab: 0
+
+    // Paths currently cut to the clipboard (dimmed in the views).
+    property var cutSet: ({})
+
     readonly property bool isAuxView: activeView === "settings" || activeView === "pc"
+    readonly property bool anyModalOpen: inputModal.visible || propsDialog.visible || conflictDialog.visible
+        || passwordModal.visible || quickLook.visible || commandModal.visible || batchRename.visible
+        || confirmDialog.visible || patternModal.visible || placeEdit.visible || customizePlaces.visible
+        || smbDialog.visible
+        || window.isEditingPath || openWithModal.visible || chooserOverwrite.visible
+    readonly property bool textInputFocused: !!window.activeFocusItem && window.activeFocusItem.text !== undefined && typeof window.activeFocusItem.selectAll === "function"
+    readonly property bool gridKeyboardReady: activeView === "files" && !window.textInputFocused && !searchInput.activeFocus
+        && !pathInput.activeFocus && !anyModalOpen && !!activePane && activePane.renamingPath === ""
+    // helpers used by the panes and dialogs
 
-    // Return to the file grid, restoring the nav pill to the last place row.
-    // placeIdx >= 0 also updates which place is considered active (e.g. PCView jumps).
-    function showFiles(placeIdx) {
-        activeView = "files";
-        if (placeIdx !== undefined && placeIdx >= 0) {
-            currentPlaceIndex = placeIdx;
-        }
-        currentNavIndex = currentPlaceIndex;
+    function toast(kind, text) {
+        toastItem.show(kind, text);
     }
 
-    function startEditingPath() {
-        if (activeView !== "files") return;
-        pathInput.text = engine.current_path;
-        isEditingPath = true;
-        pathInput.forceActiveFocus();
-        pathInput.selectAll();
+    function openSmbEditor(profile) {
+        var p = profile || {};
+        smbDialog.editingId = p.profile_id || p.id || "";
+        smbNameField.text = p.name || p.label || "";
+        smbServerField.text = p.server || "";
+        smbShareField.text = p.share || "";
+        smbUserField.text = p.username || "";
+        smbDomainField.text = p.domain || "";
+        smbDialog.open();
     }
 
-    function commitPathEdit() {
-        var raw = pathInput.text.trim();
-        if (raw.length > 0) {
-            engine.set_path(raw);
-        }
-        endPathEdit();
+    function removeSmbShare(id, label) {
+        confirmDialog.ask(qsTr("Remove “%1”?").arg(label || qsTr("this share")),
+            qsTr("Any password Seabunny saved will also be removed from the keyring."),
+            qsTr("Remove"), function() { core.remove_smb_profile(id); });
     }
 
-    function endPathEdit() {
+    function systemIcon(name) {
+        return core.resolve_icon(theme.iconSource === "adwaita" ? "adwaita" : "system", name);
+    }
+
+    function urlsToPaths(urls) {
+        return pane0.urlsToPaths(urls);
+    }
+
+    function defocusInputs() {
+        if (searchInput.activeFocus)
+            searchInput.focus = false;
+        if (isEditingPath)
+            isEditingPath = false;
         globalKeyHandler.forceActiveFocus();
-        isEditingPath = false;
     }
 
-    function copySelected(isCut) {
-        if (chooserMode) return;
-        if (activeView !== "files") return;
-        var items = gridContainer.getSelectedItems();
-        if (items.length === 0) return;
-        var paths = items.map(function(it) {
-            return engine.is_searching_everywhere ? it.path : (engine.current_path + "/" + it.name);
-        });
-        engine.copy_items(JSON.stringify(paths), isCut);
-    }
-
-    function extractArchiveSelection() {
-        if (chooserMode) return;
-        var paths = gridContainer.getSelectedItems().map(function(item) { return engine.current_path + "/" + item.name; });
-        engine.extract_current_archive(JSON.stringify(paths));
-    }
-
-    function triggerPaste() {
-        if (chooserMode) return;
-        if (activeView !== "files") return;
-        var conflictsJson = engine.check_clipboard_conflicts(engine.current_path);
-        var conflicts = JSON.parse(conflictsJson || "[]");
-        if (conflicts.length > 0) {
-            conflictModal.showForClipboard(conflicts, engine.current_path);
-        } else {
-            engine.paste_items(engine.current_path);
+    function showFiles() {
+        if (activeView === "files")
+            return;
+        activeView = "files";
+        // The tab has to forget it was a PC / Settings tab, otherwise the
+        // sidebar keeps finding "the tab that shows This PC" and switching to
+        // it does nothing once you have navigated away from it.
+        var t = tabs[currentTab];
+        if (t && t.view !== "files") {
+            t.view = "files";
+            tabsChanged();
         }
+    }
+
+    function setActivePane(p) {
+        if (activePane !== p) {
+            activePane = p;
+            tabs[currentTab].active = (p === pane0) ? 0 : 1;
+        }
+    }
+
+    function refreshCutSet() {
+        var c = native.clipboardFiles();
+        var s = {};
+        if (c.cut) {
+            for (var i = 0; i < c.paths.length; ++i)
+                s[c.paths[i]] = true;
+        }
+        cutSet = s;
+    }
+
+    Connections {
+        target: native
+        function onClipboardChanged() { window.refreshCutSet(); }
+        function onOpenRequested(paths, mode) { window.handleOpenRequest(paths, mode); }
+    }
+
+    // Opens an item from a view: folders navigate, archives open as
+    // folders when browsing is enabled, files launch their app.
+    function openItem(pane, item) {
+        if (!item || !item.path) return;
+        if (chooserMode && !item.is_dir) { activateFile(item.path); return; }
+        if (item.is_dir) {
+            pane.engine.set_path(item.path);
+            showFiles();
+        } else if (pane.engine.location_kind === "trash") {
+            quickLook.showFor(item.path);
+        } else if (theme.browseArchives && core.is_archive_file(item.path)) {
+            pane.engine.set_path("archive://" + item.path + "#");
+        } else {
+            core.open_item(item.path);
+        }
+    }
+
+    function selectedPaths() {
+        return activePane.selectedPaths();
+    }
+
+    function copySelection(cut) {
+        if (chooserMode) return;
+        var paths = selectedPaths();
+        if (paths.length === 0 || engine.location_kind === "trash")
+            return;
+        native.setClipboardFiles(paths, cut && engine.location_kind !== "archive");
+        toast("info", cut ? theme.plural(paths.length, qsTr("1 item cut"), qsTr("%1 items cut")) : theme.plural(paths.length, qsTr("1 item copied"), qsTr("%1 items copied")));
+    }
+
+    function copyPathOfSelection() {
+        if (chooserMode) return;
+        var paths = selectedPaths();
+        if (paths.length === 0)
+            paths = [engine.current_path];
+        native.setClipboardText(paths.join("\n"));
+        toast("info", qsTr("Path copied"));
+    }
+
+    function pasteInto(dest) {
+        if (chooserMode) return;
+        var c = native.clipboardFiles();
+        if (!c.paths || c.paths.length === 0 || !dest)
+            return;
+        transfer(c.paths, dest, c.cut ? "move" : "copy", c.cut);
+    }
+
+    function afterCutPaste() {
+        // Consumed cut entries are pruned after the background operation finishes.
+    }
+
+    // Starts a copy/move, asking first when names clash. `fromCut` is set
+    // only when pasting a cut, which is when the clipboard gets used up.
+    function transfer(paths, dest, mode, fromCut) {
+        if (chooserMode) return;
+        var conflicts = JSON.parse(core.check_conflicts(JSON.stringify(paths), dest) || "[]");
+        if (conflicts.length > 0) {
+            conflictDialog.showFor(conflicts, paths, dest, mode, !!fromCut);
+            return;
+        }
+        core.transfer(JSON.stringify(paths), dest, mode, "rename");
+        if (fromCut)
+            afterCutPaste();
     }
 
     function handleDrop(paths, destDir, asCopy) {
         if (chooserMode) return;
-        var conflictsJson = engine.check_paste_conflicts(JSON.stringify(paths), destDir);
-        var conflicts = JSON.parse(conflictsJson || "[]");
-        if (conflicts.length > 0) {
-            conflictModal.showForDrop(conflicts, paths, destDir, asCopy);
-        } else {
-            engine.drop_items(JSON.stringify(paths), destDir, asCopy);
+        if (!destDir || paths.length === 0)
+            return;
+        transfer(paths, destDir, asCopy ? "copy" : "move");
+    }
+
+    function trashSelection() {
+        if (chooserMode) return;
+        var paths = selectedPaths();
+        if (paths.length === 0)
+            return;
+        if (engine.location_kind === "trash") {
+            deleteSelection();
+            return;
+        }
+        if (engine.location_kind === "archive")
+            return;
+        core.trash_items(JSON.stringify(paths));
+        activePane.clearSelection();
+    }
+
+    function deleteSelection() {
+        if (chooserMode) return;
+        var paths = selectedPaths();
+        if (paths.length === 0 || engine.location_kind === "archive")
+            return;
+        var pane = activePane;
+        confirmDialog.ask(
+            paths.length === 1 ? qsTr("Permanently delete “%1”?").arg(paths[0].split("/").pop())
+                               : qsTr("Permanently delete %1 items?").arg(paths.length),
+            qsTr("Deleted items can't be restored."),
+            qsTr("Delete"),
+            function() { core.delete_items(JSON.stringify(paths)); pane.clearSelection(); });
+    }
+
+    function showProperties(paths) {
+        if (chooserMode) return;
+        if (paths.length > 0)
+            propsDialog.showFor(paths);
+    }
+
+    function startNewFolder() {
+        if (chooserMode) return;
+        if (engine.location_kind !== "dir")
+            return;
+        inputModal.showNewFolder();
+    }
+
+    function toggleQuickLook() {
+        if (chooserMode) return;
+        if (quickLook.visible) {
+            quickLook.close();
+            return;
+        }
+        var paths = selectedPaths();
+        if (paths.length > 0)
+            quickLook.showFor(activePane.cursorPath || paths[paths.length - 1]);
+    }
+    function saveCurrentTab() {
+        var t = tabs[currentTab];
+        if (!t) return;
+        t.view = window.activeView;
+        t.states = [pane0.engine.get_state(), splitView && pane1Loader.item ? pane1Loader.item.engine.get_state() : (t.states[1] || "")];
+        t.split = splitView;
+        t.active = activePane === pane0 ? 0 : 1;
+        if (window.activeView === "settings")
+            t.title = qsTr("Settings");
+        else if (window.activeView === "pc")
+            t.title = core.hostname || qsTr("This PC");
+        else
+            t.title = engine.current_dir_name;
+    }
+
+    function restoreTab(i) {
+        var t = tabs[i];
+        if (!t) return;
+        currentTab = i;
+        activePane = pane0;
+        pane0.clearSelection();
+        pane0.renamingPath = "";
+        if (pane1Loader.item) {
+            pane1Loader.item.clearSelection();
+            pane1Loader.item.renamingPath = "";
+        }
+        splitView = !!t.split;
+        if (t.states && t.states[0])
+            pane0.engine.restore_state(t.states[0]);
+        if (t.split && t.states && t.states[1]) {
+            if (pane1Loader.item)
+                pane1Loader.item.engine.restore_state(t.states[1]);
+            else
+                splitSeedState = t.states[1];
+        }
+        activePane = (t.split && t.active === 1 && pane1Loader.item) ? pane1Loader.item : pane0;
+        if (t.view === "settings")
+            window.activeView = "settings";
+        else if (t.view === "pc")
+            window.activeView = "pc";
+        else
+            showFiles();
+    }
+
+    function switchTab(i) {
+        if (i === currentTab || i < 0 || i >= tabs.length)
+            return;
+        saveCurrentTab();
+        restoreTab(i);
+        tabsChanged();
+    }
+
+    // "Downloads" from a saved pane state (for tabs not shown yet).
+    function titleFromState(stateJson) {
+        try {
+            var loc = JSON.parse(stateJson).location || "";
+            if (loc.indexOf("trash:") === 0)
+                return qsTr("Trash");
+            if (loc.indexOf("recent:") === 0)
+                return qsTr("Recent");
+            if (loc.indexOf("starred:") === 0)
+                return qsTr("Starred");
+            if (loc === core.user_dir("HOME"))
+                return qsTr("Home");
+            if (loc.indexOf("archive://") === 0)
+                loc = loc.substring(10).split("#")[0];
+            var parts = loc.split("/").filter(function(p) { return p.length > 0; });
+            return parts.length > 0 ? parts[parts.length - 1] : "/";
+        } catch (e) {
+            return "";
         }
     }
 
-    function renameSelected() {
+    function newTab(path) {
         if (chooserMode) return;
-        if (engine.archive_path.length) return;
-        if (activeView !== "files") return;
-        var items = gridContainer.getSelectedItems();
-        if (items.length === 1) {
-            var item = items[0];
-            var directory = engine.is_searching_everywhere
-                ? item.path.substring(0, item.path.lastIndexOf("/")) || "/" : engine.current_path;
-            inputModal.showRename(item.name, directory, item.is_dir);
-        }
-    }
-
-    function trashSelected() {
-        if (chooserMode) return;
-        if (engine.archive_path.length) return;
-        if (activeView !== "files") return;
-        var items = gridContainer.getSelectedItems();
-        if (items.length === 0) return;
-        var paths = items.map(function(it) {
-            return engine.is_searching_everywhere ? it.path : (engine.current_path + "/" + it.name);
+        saveCurrentTab();
+        var isSettings = path === "settings://";
+        var isPc = path === "pc://";
+        var target = (isSettings || isPc) ? "" : (path || core.user_dir("HOME"));
+        var list = tabs.slice();
+        var state = JSON.stringify({ location: target, back: [], forward: [] });
+        var title = isSettings ? qsTr("Settings") : (isPc ? (core.hostname || qsTr("This PC")) : titleFromState(state));
+        list.splice(currentTab + 1, 0, {
+            states: [state, ""],
+            split: false,
+            active: 0,
+            title: title,
+            view: isSettings ? "settings" : (isPc ? "pc" : "files")
         });
-        engine.trash_items(JSON.stringify(paths));
-        gridContainer.clearSelection();
+        tabs = list;
+        restoreTab(currentTab + 1);
     }
 
-    function showSelectedProperties() {
-        var items = gridContainer.getSelectedItems();
-        if (items.length > 1) return;
-        var path = items.length === 0 ? engine.current_path
-            : engine.is_searching_everywhere ? items[0].path : engine.current_path + "/" + items[0].name;
-        propsModal.showInfo(path);
+    // Records what the tab on screen is showing. Without this the strip (and a
+    // later switch back) thinks a tab still shows whatever it showed first.
+    function markCurrentTab(view, title) {
+        var t = tabs[currentTab];
+        if (!t)
+            return;
+        if (t.view === view && t.title === title)
+            return;
+        t.view = view;
+        t.title = title;
+        tabsChanged();
     }
 
-    // True while the user is navigating the file grid/list from the keyboard,
-    // used to draw a visible focus ring.
-    property bool keyboardNavActive: false
+    // This PC and Settings take over the current tab instead of stacking a new
+    // one on every click. If one of them is already open in another tab, jump
+    // there instead.
+    function openPc() {
+        if (chooserMode) return;
+        if (activeView === "pc")
+            return;
+        for (var p = 0; p < tabs.length; ++p) {
+            if (p !== currentTab && tabs[p] && tabs[p].view === "pc") {
+                switchTab(p);
+                return;
+            }
+        }
+        activeView = "pc";
+        markCurrentTab("pc", core.hostname || qsTr("This PC"));
+    }
 
-    // Responsive list-column visibility: fixed columns drop out as the window
-    // narrows so nothing overlaps at 760px.
-    readonly property bool listShowDate: width >= 820
-    readonly property bool listShowSize: width >= 900
-    readonly property bool listShowType: width >= 980
+    function openSettings() {
+        if (chooserMode) return;
+        if (activeView === "settings") {
+            showFiles();
+            return;
+        }
+        for (var p = 0; p < tabs.length; ++p) {
+            if (p !== currentTab && tabs[p] && tabs[p].view === "settings") {
+                switchTab(p);
+                return;
+            }
+        }
+        activeView = "settings";
+        markCurrentTab("settings", qsTr("Settings"));
+    }
 
-    // True while any modal dialog is open (arrow keys / shortcuts must not fire).
-    readonly property bool anyModalOpen: inputModal.visible || favoritePrompt.visible || propsModal.visible || openWithModal.visible
-        || conflictModal.visible || passwordModal.visible || chooserOverwrite.visible || window.isEditingPath
+    function openInNewTab(path) {
+        newTab(path);
+    }
 
-    // True when a plain keystroke should be routed to the grid/list (no input
-    // field focused, files view visible, no modal open).
-    readonly property bool textInputFocused: !!window.activeFocusItem
-        && window.activeFocusItem.text !== undefined
-        && typeof window.activeFocusItem.selectAll === "function"
-    readonly property bool gridKeyboardReady: window.activeView === "files"
-        && !window.textInputFocused && !window.anyModalOpen
-    readonly property bool fileActionsReady: window.gridKeyboardReady && !window.chooserMode
-        && !engine.archive_path.length && engine.current_path !== engine.trash_root
+    function closeTab(i) {
+        if (tabs.length <= 1) {
+            window.close();
+            return;
+        }
+        if (i === currentTab) {
+            var list = tabs.slice();
+            list.splice(i, 1);
+            tabs = list;
+            restoreTab(Math.min(i, tabs.length - 1));
+        } else {
+            saveCurrentTab();
+            var l2 = tabs.slice();
+            l2.splice(i, 1);
+            tabs = l2;
+            if (i < currentTab)
+                currentTab -= 1;
+        }
+    }
 
-    onActiveChanged: if (active && !chooserMode) engine.sync_shared_state()
+    property string splitSeedPath: ""
+    // Saved state for the right pane, applied when its Loader creates the item.
+    property string splitSeedState: ""
 
-    // Global Keyboard Shortcuts. Each is *enabled* only when it should apply so
-    // that a disabled shortcut never swallows the key from a focused text field.
-    Shortcut { sequence: "Ctrl+Z"; enabled: !window.chooserMode && window.gridKeyboardReady && engine.can_undo; onActivated: engine.undo() }
-    Shortcut { sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]; enabled: !window.chooserMode && window.gridKeyboardReady && engine.can_redo; onActivated: engine.redo() }
-    Shortcut { sequence: "Ctrl+C"; enabled: !window.chooserMode && window.gridKeyboardReady; onActivated: window.copySelected(false) }
-    Shortcut { sequence: "Ctrl+X"; enabled: window.fileActionsReady; onActivated: window.copySelected(true) }
-    Shortcut { sequence: "Ctrl+V"; enabled: window.fileActionsReady; onActivated: window.triggerPaste() }
-    Shortcut { sequence: "Ctrl+A"; enabled: window.gridKeyboardReady; onActivated: gridContainer.selectAll() }
-    Shortcut { sequence: "Ctrl+H"; enabled: window.activeView === "files" && !window.anyModalOpen; onActivated: engine.toggle_show_hidden() }
-    Shortcut { sequence: "Ctrl+L"; enabled: !window.anyModalOpen || window.isEditingPath; onActivated: window.startEditingPath() }
-    Shortcut { sequence: "Ctrl+F"; enabled: window.activeView === "files" && !window.anyModalOpen; onActivated: { searchInput.forceActiveFocus(); searchInput.selectAll(); } }
-    Shortcut { sequences: ["F5", "Ctrl+R"]; enabled: window.gridKeyboardReady; onActivated: engine.refresh() }
-    Shortcut { sequence: "Ctrl+Shift+N"; enabled: window.fileActionsReady && !engine.is_searching_everywhere; onActivated: inputModal.showNewFolder() }
-    Shortcut { sequence: "F2"; autoRepeat: false; enabled: window.fileActionsReady; onActivated: window.renameSelected() }
-    Shortcut { sequence: "Delete"; autoRepeat: false; enabled: window.fileActionsReady; onActivated: window.trashSelected() }
-    Shortcut { sequence: "Alt+Return"; enabled: !window.chooserMode && window.gridKeyboardReady && !engine.archive_path.length; onActivated: window.showSelectedProperties() }
-    Shortcut { sequence: "Ctrl+1"; enabled: window.gridKeyboardReady; onActivated: engine.view_mode = "grid" }
-    Shortcut { sequence: "Ctrl+2"; enabled: window.gridKeyboardReady; onActivated: engine.view_mode = "list" }
-    Shortcut { sequence: "F9"; enabled: !window.anyModalOpen; onActivated: window.sidebarExpanded = !window.sidebarExpanded }
-    Shortcut { sequence: "Alt+Home"; enabled: window.gridKeyboardReady; onActivated: engine.set_path(engine.place_path("")) }
-    Shortcut { sequence: "Alt+Left"; enabled: window.gridKeyboardReady && engine.can_go_back; onActivated: engine.go_back() }
-    Shortcut { sequence: "Alt+Right"; enabled: window.gridKeyboardReady && engine.can_go_forward; onActivated: engine.go_forward() }
-    Shortcut { sequence: "Alt+Up"; enabled: window.gridKeyboardReady; onActivated: engine.navigate_up() }
+    function seedSplit() {
+        if (!pane1Loader.item)
+            return;
+        if (splitSeedState !== "") {
+            var st = splitSeedState;
+            splitSeedState = "";
+            pane1Loader.item.engine.restore_state(st);
+            return;
+        }
+        if (splitSeedPath === "")
+            return;
+        var p = splitSeedPath;
+        splitSeedPath = "";
+        pane1Loader.item.engine.set_path(p);
+        activePane = pane1Loader.item;
+    }
+
+    function toggleSplit() {
+        if (chooserMode) return;
+        if (window.activeView !== "files")
+            return;
+        if (splitView) {
+            activePane = pane0;
+            splitView = false;
+            splitSeedPath = "";
+            return;
+        }
+        splitSeedPath = engine.location_kind === "dir" ? engine.current_path : core.user_dir("HOME");
+        splitView = true;
+        seedSplit();
+    }
+
+    function saveSession() {
+        if (chooserMode) return;
+        saveCurrentTab();
+        var session = {
+            tabs: tabs.map(function(t) { return { states: t.states, split: t.split, active: t.active }; }),
+            current: currentTab,
+            width: window.width,
+            height: window.height,
+            maximized: window.visibility === Window.Maximized,
+            sidebar: sidebar.expanded
+        };
+        core.set_setting("session", JSON.stringify(session));
+    }
+
+    // geometryOnly: started with explicit paths, so open just those.
+    function restoreSession(geometryOnly) {
+        if (core.get_setting("restoreSession") === "false" || native.isAdmin)
+            return false;
+        var raw = core.get_setting("session");
+        if (!raw) {
+            try {
+                var legacy = JSON.parse(core.get_setting("folderTabs"));
+                if (legacy.version === 1 && Array.isArray(legacy.paths)) raw = JSON.stringify({
+                    current: legacy.active || 0, tabs: legacy.paths.map(function(path) { return {states:[JSON.stringify({location:path,back:[],forward:[]}), ""],split:false,active:0}; })
+                });
+            } catch (ignored) {}
+        }
+        if (!raw) return false;
+        try {
+            var s = JSON.parse(raw);
+            if (s.width > 300 && s.height > 200) {
+                window.width = s.width;
+                window.height = s.height;
+            }
+            if (s.maximized)
+                window.showMaximized();
+            if (sidebar.savedState.expanded === undefined) sidebar.expanded = s.sidebar === true;
+            if (!geometryOnly && s.tabs && s.tabs.length > 0) {
+                tabs = s.tabs.map(function(t) { return { states: t.states || ["", ""], split: !!t.split, active: t.active || 0, title: window.titleFromState(t.states ? t.states[0] : "") }; });
+                restoreTab(Math.max(0, Math.min(s.current || 0, tabs.length - 1)));
+                return true;
+            }
+        } catch (e) {
+            console.warn("seabunny: could not restore session: " + e);
+        }
+        return false;
+    }
+
+    // Paths from the command line or D-Bus (another `seabunny`, a browser's
+    // "Show in folder", ...).
+    function handleOpenRequest(paths, mode) {
+        if (mode === "window" || paths.length === 0) {
+            window.raise();
+            window.requestActivate();
+            if (mode === "window")
+                newTab(core.user_dir("HOME"));
+            return;
+        }
+        // Group by folder so several files in one folder end up selected
+        // together in a single view.
+        var dirs = [];
+        var picks = {};
+        var props = [];
+        for (var i = 0; i < paths.length; ++i) {
+            var p = paths[i];
+            var info = JSON.parse(core.get_item_info(p) || "{}");
+            if (!info.exists)
+                continue;
+            if (mode === "properties") {
+                props.push(p);
+                continue;
+            }
+            var dir = (info.is_dir && mode !== "select") ? p : (info.parent || "/");
+            if (!picks[dir]) {
+                picks[dir] = [];
+                dirs.push(dir);
+            }
+            if (dir !== p)
+                picks[dir].push(p);
+        }
+        if (props.length > 0)
+            showProperties(props);
+        for (var j = 0; j < dirs.length; ++j) {
+            var d = dirs[j];
+            if (activeView === "files" && engine.current_path === d) {
+                // Already showing that folder: just select the items.
+                if (picks[d].length > 0)
+                    activePane.selectPaths(picks[d]);
+            } else {
+                newTab(d);
+                if (picks[d].length > 0)
+                    activePane.pendingSelect = picks[d];
+            }
+        }
+        window.raise();
+        window.requestActivate();
+    }
+
+    function persistSidebarState() { sidebar.persistState(); }
+    onClosing: { persistSidebarState(); if (chooserMode) chooser.cancel(); else saveSession(); }
+
+    Component.onCompleted: {
+        if (chooserMode) {
+            engine.set_path(chooser.config.folder);
+            engine.configure_chooser(chooser.config.directory, chooser.filterRules(chooserFilter));
+            chooser.config.choices.forEach(function(choice) { chooserChoices[choice.id] = choice.selected; });
+            Qt.callLater(function() {
+                if (chooser.config.save) {
+                    updateChooserName(); chooserName.forceActiveFocus();
+                    var dot = chooserName.text.lastIndexOf("."); chooserName.select(0, dot > 0 ? dot : chooserName.text.length);
+                } else globalKeyHandler.forceActiveFocus();
+            });
+            return;
+        }
+        refreshCutSet();
+        var pending = native.takePendingOpen();
+        var restored = restoreSession(pending.length > 0);
+        if (native.startupMode === "mini") {
+            sidebar.expanded = false;
+            theme.zoomIndex = 1;
+        }
+        var first = !restored;
+        for (var i = 0; i < pending.length; ++i) {
+            var p = pending[i];
+            var info = JSON.parse(core.get_item_info(p) || "{}");
+            if (!info.exists)
+                continue;
+            var dir = info.is_dir ? p : info.parent;
+            if (first) {
+                pane0.engine.set_path(dir);
+                first = false;
+            } else {
+                newTab(dir);
+            }
+            if (!info.is_dir)
+                activePane.pendingSelect = [p];
+        }
+        globalKeyHandler.forceActiveFocus();
+    }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: !window.chooserMode && core.can_undo && !window.anyModalOpen && !window.textInputFocused && !searchInput.activeFocus && activePane.renamingPath === ""; onActivated: core.undo() }
+    Shortcut { sequences: ["Ctrl+Y", "Ctrl+Shift+Z"]; enabled: !window.chooserMode && core.can_redo && !window.anyModalOpen && !window.textInputFocused && !searchInput.activeFocus && activePane.renamingPath === ""; onActivated: core.redo() }
+    Shortcut { sequence: "Ctrl+C"; enabled: !window.chooserMode && window.gridKeyboardReady; onActivated: window.copySelection(false) }
+    Shortcut { sequence: "Ctrl+X"; enabled: !window.chooserMode && window.gridKeyboardReady; onActivated: window.copySelection(true) }
+    Shortcut { sequence: "Ctrl+V"; enabled: !window.chooserMode && window.gridKeyboardReady && engine.location_kind === "dir"; onActivated: window.pasteInto(engine.current_path) }
+    Shortcut { sequence: "Ctrl+A"; enabled: window.gridKeyboardReady; onActivated: window.activePane.selectAll() }
+    Shortcut { sequence: "Ctrl+Shift+I"; enabled: window.gridKeyboardReady; onActivated: window.activePane.invertSelection() }
+    Shortcut { sequence: "Ctrl+S"; enabled: window.gridKeyboardReady; onActivated: patternModal.openFor() }
+    Shortcut { sequence: "Ctrl+H"; onActivated: engine.toggle_show_hidden() }
+    Shortcut { sequences: ["Ctrl+L", "Alt+D"]; onActivated: window.startEditingPath() }
+    Shortcut { sequence: "Ctrl+F"; onActivated: { window.showFiles(); searchInput.forceActiveFocus(); searchInput.selectAll(); } }
+    Shortcut {
+        sequence: "F2"
+        enabled: window.gridKeyboardReady && !window.chooserMode
+        onActivated: {
+            if (window.selectedPaths().length > 1)
+                batchRename.showFor(window.activePane.selectedItems());
+            else
+                window.activePane.startRename();
+        }
+    }
+    Shortcut { sequence: "Space"; enabled: !window.chooserMode && (quickLook.visible || window.gridKeyboardReady); onActivated: window.toggleQuickLook() }
+    Shortcut { sequence: "Delete"; enabled: !window.chooserMode && window.gridKeyboardReady; onActivated: window.trashSelection() }
+    Shortcut { sequence: "Shift+Delete"; enabled: !window.chooserMode && window.gridKeyboardReady; onActivated: window.deleteSelection() }
+    Shortcut {
+        sequences: ["Alt+Left", StandardKey.Back]
+        enabled: !window.anyModalOpen && (engine.can_go_back || window.isAuxView || engine.is_searching_everywhere)
+        onActivated: {
+            if (engine.is_searching_everywhere) {
+                engine.clear_search();
+                searchInput.text = "";
+            } else if (window.isAuxView) {
+                window.showFiles();
+            } else {
+                engine.go_back();
+            }
+        }
+    }
+    Shortcut {
+        sequences: ["Alt+Right", StandardKey.Forward]
+        enabled: !window.anyModalOpen && engine.can_go_forward && !window.isAuxView && !engine.is_searching_everywhere
+        onActivated: engine.go_forward()
+    }
+    Shortcut { sequence: "Alt+Up"; onActivated: engine.navigate_up() }
+    Shortcut { sequence: "Alt+Home"; onActivated: { window.showFiles(); engine.set_path(core.user_dir("HOME")); } }
     Shortcut { sequence: "Backspace"; enabled: window.gridKeyboardReady && engine.can_go_back; onActivated: engine.go_back() }
-    // NOTE: Return / Enter are handled in globalKeyHandler below (not as a
-    // Shortcut) so they are never swallowed from a focused text field.
+    Shortcut { sequences: ["F5", "Ctrl+R"]; onActivated: engine.refresh() }
+    Shortcut { sequence: "Ctrl+T"; onActivated: window.newTab(engine.location_kind === "dir" ? engine.current_path : "") }
+    Shortcut { sequence: "Ctrl+W"; onActivated: { if (chooserMode) chooser.cancel(); else window.closeTab(window.currentTab); } }
+    Shortcut { sequences: ["Ctrl+Tab", "Ctrl+PgDown"]; onActivated: window.switchTab((window.currentTab + 1) % window.tabs.length) }
+    Shortcut { sequences: ["Ctrl+Shift+Tab", "Ctrl+PgUp"]; onActivated: window.switchTab((window.currentTab + window.tabs.length - 1) % window.tabs.length) }
+    Shortcut { sequence: "Ctrl+N"; enabled: !window.chooserMode; onActivated: core.open_new_window(engine.location_kind === "dir" ? engine.current_path : "") }
+    Shortcut { sequence: "Ctrl+Shift+N"; enabled: !window.anyModalOpen; onActivated: window.startNewFolder() }
+    Shortcut { sequence: "F3"; onActivated: window.toggleSplit() }
+    Shortcut { sequence: "F9"; onActivated: sidebar.expanded = !sidebar.expanded }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++", StandardKey.ZoomIn]; onActivated: theme.stepZoom(1) }
+    Shortcut { sequences: ["Ctrl+-", StandardKey.ZoomOut]; onActivated: theme.stepZoom(-1) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: theme.zoomIndex = 2 }
+    Shortcut { sequence: "Ctrl+1"; onActivated: engine.set_view("grid") }
+    Shortcut { sequence: "Ctrl+2"; onActivated: engine.set_view("list") }
+    Shortcut { sequence: "Ctrl+D"; enabled: engine.location_kind === "dir"; onActivated: core.add_bookmark(engine.current_path) }
+    Shortcut { sequence: "Ctrl+Shift+C"; enabled: window.gridKeyboardReady; onActivated: window.copyPathOfSelection() }
+    Shortcut {
+        sequences: ["Alt+Return", "Alt+Enter"]
+        enabled: window.gridKeyboardReady
+        onActivated: {
+            var p = window.selectedPaths();
+            window.showProperties(p.length > 0 ? p : [engine.current_path]);
+        }
+    }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: window.close() }
 
-    // Full-window catcher for mouse back / forward side buttons. It sits below
-    // the shell (z: 0) and only accepts the two extra buttons, so ordinary
-    // clicks are untouched while the side buttons always navigate history.
+    // Mouse back / forward buttons.
     MouseArea {
         anchors.fill: parent
         z: 0
         acceptedButtons: Qt.BackButton | Qt.ForwardButton
         onPressed: function(mouse) {
-            if (mouse.button === Qt.BackButton) {
-                if (engine.can_go_back) engine.go_back();
-            } else if (mouse.button === Qt.ForwardButton) {
-                if (engine.can_go_forward) engine.go_forward();
-            }
+            if (mouse.button === Qt.BackButton && engine.can_go_back)
+                engine.go_back();
+            else if (mouse.button === Qt.ForwardButton && engine.can_go_forward)
+                engine.go_forward();
         }
     }
 
@@ -566,269 +856,188 @@ ApplicationWindow {
         z: -100
 
         Keys.onPressed: function(event) {
-            if (window.anyModalOpen) {
+            if (window.anyModalOpen)
+                return;
+            if (event.key === Qt.Key_Escape) {
+                if (window.activePane.selectedCount > 0) {
+                    window.activePane.clearSelection();
+                } else if (engine.is_searching_everywhere) {
+                    engine.clear_search();
+                    searchInput.text = "";
+                } else if (window.isAuxView) {
+                    window.showFiles();
+                }
+                window.keyboardNavActive = false;
+                event.accepted = true;
                 return;
             }
-
-            // Always-on arrow navigation + open, for both grid and list views.
             if (window.gridKeyboardReady) {
+                var shift = !!(event.modifiers & Qt.ShiftModifier);
+                var pane = window.activePane;
                 switch (event.key) {
                 case Qt.Key_Up:
-                    window.keyboardNavActive = true;
-                    gridContainer.moveSelection(0, -1, !!(event.modifiers & Qt.ShiftModifier));
-                    event.accepted = true;
-                    return;
+                    window.keyboardNavActive = true; pane.moveSelection(0, -1, shift); event.accepted = true; return;
                 case Qt.Key_Down:
-                    window.keyboardNavActive = true;
-                    gridContainer.moveSelection(0, 1, !!(event.modifiers & Qt.ShiftModifier));
-                    event.accepted = true;
-                    return;
+                    window.keyboardNavActive = true; pane.moveSelection(0, 1, shift); event.accepted = true; return;
                 case Qt.Key_Left:
-                    if (engine.view_mode !== "list") {
-                        window.keyboardNavActive = true;
-                        gridContainer.moveSelection(-1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                        event.accepted = true;
-                        return;
-                    }
+                    if (!pane.isList()) { window.keyboardNavActive = true; pane.moveSelection(-1, 0, shift); event.accepted = true; return; }
                     break;
                 case Qt.Key_Right:
-                    if (engine.view_mode !== "list") {
-                        window.keyboardNavActive = true;
-                        gridContainer.moveSelection(1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                        event.accepted = true;
-                        return;
-                    }
+                    if (!pane.isList()) { window.keyboardNavActive = true; pane.moveSelection(1, 0, shift); event.accepted = true; return; }
                     break;
-                case Qt.Key_Return:
-                case Qt.Key_Enter:
-                    gridContainer.openSelected();
+                case Qt.Key_Home:
+                    window.keyboardNavActive = true; pane.selectRow(0, false, shift); pane.ensureVisible(0); event.accepted = true; return;
+                case Qt.Key_End:
+                    window.keyboardNavActive = true;
+                    pane.selectRow(engine.item_count - 1, false, shift);
+                    pane.ensureVisible(engine.item_count - 1);
                     event.accepted = true;
                     return;
+                case Qt.Key_Return:
+                case Qt.Key_Enter:
+                    pane.openSelected(); event.accepted = true; return;
                 }
             }
-
-            // Type-to-search: any printable key pulls focus into the search bar.
-            if (!searchInput.activeFocus && window.activeView === "files") {
-                if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
-                    if (event.text.length > 0 && event.key !== Qt.Key_Escape && event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter && event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backspace && event.key !== Qt.Key_Delete) {
-                        searchInput.forceActiveFocus();
-                        searchInput.text = event.text;
-                        searchInput.cursorPosition = 1;
-                        event.accepted = true;
-                    }
-                }
+            // Type to filter: printable keys go to the search box.
+            if (!searchInput.activeFocus && window.activeView === "files"
+                    && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+                    && event.text.length > 0 && event.text.charCodeAt(0) > 32 && event.key !== Qt.Key_Delete) {
+                searchInput.forceActiveFocus();
+                searchInput.text = event.text;
+                searchInput.cursorPosition = searchInput.text.length;
+                event.accepted = true;
             }
         }
     }
 
-    readonly property var engine: folderTabs.activeEngine || preferencesEngine
-    property bool switchingTab: false
-    property var pendingTabState: null
-    property int tabRestoreRevision: 0
-
-    function cancelTabRestore() {
-        restoreScrollTimer.stop();
-        pendingTabState = null;
-        tabRestoreRevision++;
-    }
-
-    function captureTabState() {
-        if (pendingTabState) return pendingTabState;
-        var last = gridContainer.displayedItems[gridContainer.lastSelectedIndex];
-        var anchor = gridContainer.displayedItems[gridContainer.anchorIndex];
-        return {query: searchInput.text, view: activeView,
-            paths: gridContainer.getSelectedItems().map(function(item) { return item.path || engine.current_path + "/" + item.name; }), gridY: filesGridView.contentY,
-            listY: filesListView.contentY,
-            last: last ? last.path || engine.current_path + "/" + last.name : "",
-            anchor: anchor ? anchor.path || engine.current_path + "/" + anchor.name : ""};
-    }
-
-    function restoreTabState() {
-        if (!pendingTabState || engine.is_loading) return;
-        var state = pendingTabState;
-        gridContainer.reloadItems();
-        var indices = {};
-        gridContainer.displayedItems.forEach(function(item, index) {
-            var path = item.path || engine.current_path + "/" + item.name;
-            if (state.paths.indexOf(path) >= 0) indices[index] = true;
-        });
-        gridContainer.selectedIndices = indices;
-        gridContainer.lastSelectedIndex = gridContainer.displayedItems.findIndex(function(item) { return (item.path || engine.current_path + "/" + item.name) === state.last; });
-        gridContainer.anchorIndex = gridContainer.displayedItems.findIndex(function(item) { return (item.path || engine.current_path + "/" + item.name) === state.anchor; });
-        restoreScrollTimer.backend = engine;
-        restoreScrollTimer.revision = ++tabRestoreRevision;
-        restoreScrollTimer.restart();
-    }
-
-    Timer {
-        id: restoreScrollTimer
-        interval: 16
-        property var backend: null
-        property int revision: 0
-        onTriggered: {
-            if (window.engine !== backend || window.tabRestoreRevision !== revision || !window.pendingTabState) return;
-            var state = window.pendingTabState;
-            filesGridView.forceLayout();
-            filesListView.forceLayout();
-            filesGridView.contentY = Math.max(0, Math.min(state.gridY, Math.max(0, filesGridView.contentHeight - filesGridView.height)));
-            filesListView.contentY = Math.max(0, Math.min(state.listY, Math.max(0, filesListView.contentHeight - filesListView.height)));
-            window.pendingTabState = null;
+    SeabunnyCore {
+        id: core
+        onNotify: function(kind, text) { window.toast(kind, text); }
+        onOperation_finished: function(kind, ok, resultJson) {
+            if (kind === "move") native.pruneCutClipboard();
+            var r = null;
+            try { r = JSON.parse(resultJson); } catch (e) { r = null; }
+            if (kind === "trash" && r && r.failed && r.failed.length > 0) {
+                var failed = r.failed;
+                confirmDialog.ask(qsTr("Can't move to the trash"),
+                    theme.plural(failed.length, qsTr("1 item can't be put in the trash on this drive. Delete it permanently instead?"), qsTr("%1 items can't be put in the trash on this drive. Delete them permanently instead?")),
+                    qsTr("Delete Permanently"),
+                    function() { core.delete_items(JSON.stringify(failed)); });
+            }
+            if (r && r.reload_drives)
+                core.load_drives();
+            if (r && r.created && r.created.length > 0) {
+                // Select what was just created in the pane showing its folder.
+                var parent = r.created[0].substring(0, r.created[0].lastIndexOf("/"));
+                if (window.activePane.engine.current_path === parent)
+                    window.activePane.pendingSelect = r.created;
+            }
+            // Views that aren't watched directly (trash on other drives,
+            // recent, starred) refresh after operations.
+            var kinds = pane1Loader.item ? [pane0, pane1Loader.item] : [pane0];
+            for (var i = 0; i < kinds.length; ++i) {
+                var lk = kinds[i].engine.location_kind;
+                if (lk !== "dir" && lk !== "search")
+                    kinds[i].engine.refresh();
+            }
         }
-    }
-
-    function openFolderTab(path, background) {
-        if (chooserMode) { engine.set_path(path); return true; }
-        return folderTabs.open(path, !!background);
-    }
-
-    SeabunnyEngine { id: preferencesEngine; objectName: "settingsEngine" }
-    FolderTabs {
-        id: folderTabs
-        settingsEngine: preferencesEngine
-        persistent: !window.chooserMode
-        captureState: window.captureTabState
-        onActivated: function(entry) {
-            window.tabRestoreRevision++;
-            window.switchingTab = true;
-            var state = entry.state || {query: "", view: "files", paths: [], gridY: 0, listY: 0, last: "", anchor: ""};
-            window.activeView = state.view;
-            searchInput.text = state.query;
-            filterTimer.stop();
-            gridContainer.clearSelection();
-            gridContainer.reloadItems();
-            window.pendingTabState = state;
-            window.switchingTab = false;
-            window.restoreTabState();
-            window.endPathEdit();
-            window.syncPlaces();
-            globalKeyHandler.forceActiveFocus();
-        }
-        onNavigated: {
-            window.tabRestoreRevision++;
+        onPassword_required: function(json) { passwordModal.openFor(JSON.parse(json)); }
+        onSmb_mounted: function(profileId, path) {
+            window.showFiles();
             searchInput.text = "";
-            filterTimer.stop();
-            if (window.isEditingPath) window.endPathEdit();
-            Qt.callLater(window.syncPlaces);
-            window.pendingTabState = null;
-            gridContainer.clearSelection();
-            window.keyboardNavActive = false;
-            dirTransitionAnim.restart();
+            engine.set_path(path);
         }
-    }
-
-    Component.onCompleted: {
-        sidebarReady = true;
-        if (chooserMode) {
-            folderTabs.open(chooser.config.folder, false);
-            if (chooser.config.save) Qt.callLater(function() {
-                window.updateChooserName();
-                chooserName.forceActiveFocus();
-                var extension = chooserName.text.lastIndexOf(".");
-                chooserName.select(0, extension > 0 ? extension : chooserName.text.length);
-            });
-        } else folderTabs.restore();
-    }
-    onClosing: {
-        saveSidebarState();
-        if (chooserMode) chooser.cancel(); else folderTabs.persist();
-    }
-    Shortcut { sequence: "Ctrl+T"; enabled: !window.anyModalOpen; onActivated: window.openFolderTab(engine.current_path, false) }
-    Shortcut { sequence: "Ctrl+W"; enabled: !window.anyModalOpen; onActivated: { if (chooserMode) chooser.cancel(); else folderTabs.close(folderTabs.currentIndex); } }
-    Shortcut { sequence: "Ctrl+Tab"; enabled: !window.anyModalOpen; onActivated: folderTabs.cycle(1) }
-    Shortcut { sequence: "Ctrl+Shift+Tab"; enabled: !window.anyModalOpen; onActivated: folderTabs.cycle(-1) }
-
-    ParallelAnimation {
-        id: dirTransitionAnim
-
-        NumberAnimation {
-            target: mainStageContent
-            property: "opacity"
-            from: 0.2
-            to: 1.0
-            duration: theme.motionDuration(170)
-            easing.type: Easing.OutCubic
+        onShare_link_ready: function(shareId, url) {
+            native.setClipboardText(url);
+            window.toast("info", qsTr("Share link copied to clipboard!"));
         }
-        NumberAnimation {
-            target: stageTranslate
-            property: "y"
-            from: 10
-            to: 0
-            duration: theme.motionDuration(190)
-            easing.type: Easing.OutCubic
+        onShare_link_error: function(message) {
+            window.toast("error", qsTr("Could not share via link: ") + message);
         }
-        NumberAnimation {
-            target: stageScale
-            property: "xScale"
-            from: 0.985
-            to: 1.0
-            duration: theme.motionDuration(190)
-            easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            target: stageScale
-            property: "yScale"
-            from: 0.985
-            to: 1.0
-            duration: theme.motionDuration(190)
-            easing.type: Easing.OutCubic
+        onStarred_changed: {
+            pane0.engine.reload_starred();
+            if (pane1Loader.item)
+                pane1Loader.item.engine.reload_starred();
         }
     }
 
     Theme {
         id: theme
-        onReducedMotionChanged: {
-            if (theme.reducedMotion) Qt.callLater(function() { theme.finishAnimations(window); });
-        }
+        // Archives open like folders on double click.
+        property bool browseArchives: true
     }
 
-    FontLoader {
-        id: phosphorFontRegular
-        source: "qrc:/seabunny/fonts/Phosphor.ttf"
-    }
+    FontLoader { source: "qrc:/seabunny/fonts/Phosphor.ttf" }
+    FontLoader { source: "qrc:/seabunny/fonts/Phosphor-Bold.ttf" }
 
-    FontLoader {
-        id: phosphorFontBold
-        source: "qrc:/seabunny/fonts/Phosphor-Bold.ttf"
-    }
-
-    // ==========================================
-    // ORGANIC BACKGROUND SHAPES
-    // ==========================================
+    // Decorative background blobs (skipped in low-power mode).
     Item {
         anchors.fill: parent
-        z: 0
-
+        visible: !theme.lowPower
         Rectangle {
-            width: 420
-            height: 220
-            radius: 200
-            x: -40
-            y: -50
+            width: 420; height: 220; radius: 200; x: -40; y: -50
             color: theme.primaryContainer
             opacity: theme.isDark ? 0.22 : 0.35
         }
-
         Rectangle {
-            width: 380
-            height: 380
-            radius: 190
-            x: parent.width - 280
-            y: parent.height - 300
+            width: 380; height: 380; radius: 190
+            x: parent.width - 280; y: parent.height - 300
             color: theme.secondaryContainer
             opacity: theme.isDark ? 0.18 : 0.28
         }
     }
 
-    // ==========================================
-    // APP SHELL
-    // ==========================================
-    ColumnLayout {
-        id: appShell
-        anchors.fill: parent
-        spacing: 12
-        z: 1
+    // The settings tab is part of the URL: settings://behavior and friends.
+    function settingsUrl() {
+        var slugs = ["interface", "behavior", "accessibility", "experimental", "about", "share", "network"];
+        return "settings://" + (slugs[settingsView.activeTab] || slugs[0]);
+    }
 
-        // Top Navigation Bar
+    function settingsTabName() {
+        var names = [qsTr("Interface"), qsTr("Behavior"), qsTr("Accessibility"),
+                     qsTr("Experimental"), qsTr("About Seabunny"), qsTr("Share"), qsTr("Network")];
+        return names[settingsView.activeTab] || names[0];
+    }
+
+    function startEditingPath() {
+        pathInput.text = window.activeView === "pc" ? "pc://"
+            : (window.activeView === "settings" ? window.settingsUrl()
+            : (engine.location_kind === "dir" ? engine.current_path : ""));
+        isEditingPath = true;
+        pathInput.forceActiveFocus();
+        pathInput.selectAll();
+    }
+
+    function commitPathEdit() {
+        var raw = pathInput.text.trim();
+        isEditingPath = false;
+        if (raw.length === 0) {
+            globalKeyHandler.forceActiveFocus();
+            return;
+        }
+        if (raw === "pc" || raw === "pc://" || raw === "pc:///" || raw === "thispc://" || raw === "computer:///") {
+            window.activeView = "pc";
+            window.markCurrentTab("pc", core.hostname || qsTr("This PC"));
+        } else if (raw === "settings" || raw.indexOf("settings://") === 0) {
+            window.activeView = "settings";
+            window.markCurrentTab("settings", qsTr("Settings"));
+            if (raw === "settings://behavior") settingsView.activeTab = 1;
+            else if (raw === "settings://accessibility") settingsView.activeTab = 2;
+            else if (raw === "settings://experimental") settingsView.activeTab = 3;
+            else if (raw === "settings://about") settingsView.activeTab = 4;
+            else if (raw === "settings://share") settingsView.activeTab = 5;
+            else if (raw === "settings://network") settingsView.activeTab = 6;
+            else settingsView.activeTab = 0;
+        } else {
+            showFiles();
+            engine.set_path(raw);
+        }
+        globalKeyHandler.forceActiveFocus();
+    }
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 10
+        z: 1
         RowLayout {
             Layout.fillWidth: true
             Layout.topMargin: 14
@@ -836,176 +1045,63 @@ ApplicationWindow {
             Layout.rightMargin: 20
             spacing: 10
 
-            // Brand Pill (width + opacity animate on show/hide)
             Rectangle {
-                id: brandBadge
-                property real badgeWidth: theme.showBrandBadge ? (brandRow.implicitWidth + 24) : 0
-                Layout.preferredWidth: badgeWidth
-                Layout.minimumWidth: 0
-                height: 42
-                opacity: theme.showBrandBadge ? 1.0 : 0.0
-                visible: opacity > 0.001
+                id: adminBadge
+                visible: native.isAdmin
+                Layout.preferredWidth: adminRow.implicitWidth + 24
+                Layout.preferredHeight: 42
                 radius: theme.radiusFull
-                color: theme.surfaceContainer
-
-                Behavior on badgeWidth { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.8; damping: 0.35 } }
-                Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast; easing.type: Easing.OutCubic } }
-
+                color: theme.dangerContainer
                 RowLayout {
-                    id: brandRow
+                    id: adminRow
                     anchors.centerIn: parent
                     spacing: 8
-                    clip: true
-
-                    SeabunnyLogo {
-                        size: 24
-                        color: theme.primary
-                    }
-                    Text {
-                        text: "Seabunny"
-                        color: theme.textMain
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
+                    SeabunnyIcon { name: "shield-check"; size: 18; color: theme.danger }
+                    Text { text: qsTr("Admin"); color: theme.danger; font.pixelSize: theme.fs(14); font.bold: true }
                 }
             }
-
-            // Navigation History Chip (Back & Forward)
             Rectangle {
-                id: navHistoryChip
-                height: 42
+                id: navChip
+                Layout.preferredHeight: 42
                 radius: theme.radiusFull
                 color: theme.surfaceContainer
-                clip: true
-
                 readonly property bool canBack: engine.can_go_back || window.isAuxView || engine.is_searching_everywhere
                 readonly property bool canForward: engine.can_go_forward && !window.isAuxView && !engine.is_searching_everywhere
-
-                opacity: (canBack || canForward) ? 1.0 : 0.0
-                property real chipWidth: (canBack || canForward)
-                    ? ((canBack && canForward) ? 82 : 44)
-                    : 0
-                Layout.preferredWidth: chipWidth
-
-                Behavior on chipWidth { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.8; damping: 0.32 } }
-                Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
+                Layout.preferredWidth: canForward ? 82 : 44
+                opacity: (canBack || canForward) ? 1.0 : 0.45
 
                 RowLayout {
                     anchors.centerIn: parent
                     spacing: 2
-
-                    // Back Button
-                    Item {
-                        visible: navHistoryChip.canBack
-                        width: 36
-                        height: 36
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 18
-                            color: backBtnMouse.containsMouse ? theme.hoverOverlay : "transparent"
-
-                            SeabunnyIcon {
-                                visible: theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                name: "caret-left"
-                                size: 18
-                                color: theme.textMain
-                            }
-
-                            Image {
-                                visible: !theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                source: theme.resolveIcon("go-previous-symbolic")
-                                width: 18
-                                height: 18
-                                sourceSize.width: 36
-                                sourceSize.height: 36
-                                fillMode: Image.PreserveAspectFit
-                            }
-
-                            MouseArea {
-                                id: backBtnMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (engine.is_searching_everywhere) {
-                                        engine.clear_search_everywhere();
-                                        searchInput.text = "";
-                                    } else if (window.activeView === "settings") {
-                                        if (searchInput.text.length > 0) {
-                                            searchInput.text = "";
-                                        } else if (settingsView && settingsView.activeTab > 0) {
-                                            settingsView.activeTab = 0;
-                                        } else {
-                                            window.showFiles();
-                                        }
-                                    } else if (window.activeView === "pc") {
-                                        window.showFiles();
-                                    } else {
-                                        engine.go_back();
-                                    }
-                                }
+                    TopIconButton {
+                        iconName: "caret-left"
+                        systemIcon: "go-previous-symbolic"
+                        enabled: navChip.canBack
+                        accessibleName: qsTr("Back")
+                        onClicked: {
+                            if (engine.is_searching_everywhere) {
+                                engine.clear_search();
+                                searchInput.text = "";
+                            } else if (window.isAuxView) {
+                                window.showFiles();
+                            } else {
+                                engine.go_back();
                             }
                         }
                     }
-
-                    // Divider if both can be pressed
-                    Rectangle {
-                        visible: navHistoryChip.canBack && navHistoryChip.canForward
-                        width: 1
-                        height: 18
-                        color: theme.outlineVariant
-                    }
-
-                    // Forward Button
-                    Item {
-                        visible: navHistoryChip.canForward
-                        width: 36
-                        height: 36
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 18
-                            color: fwdBtnMouse.containsMouse ? theme.hoverOverlay : "transparent"
-
-                            SeabunnyIcon {
-                                visible: theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                name: "caret-right"
-                                size: 18
-                                color: theme.textMain
-                            }
-
-                            Image {
-                                visible: !theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                source: theme.resolveIcon("go-next-symbolic")
-                                width: 18
-                                height: 18
-                                sourceSize.width: 36
-                                sourceSize.height: 36
-                                fillMode: Image.PreserveAspectFit
-                            }
-
-                            MouseArea {
-                                id: fwdBtnMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: engine.go_forward()
-                            }
-                        }
+                    TopIconButton {
+                        visible: navChip.canForward
+                        iconName: "caret-right"
+                        systemIcon: "go-next-symbolic"
+                        accessibleName: qsTr("Forward")
+                        onClicked: engine.go_forward()
                     }
                 }
             }
 
-            // Path Bar in Center
+            // Path bar: breadcrumbs, or a text field (Ctrl+L) with Tab completion.
             Rectangle {
-                id: pathBarContainer
-                objectName: "pathBar"
-                visible: window.activeView !== "pc"
+                id: pathBar
                 Layout.fillWidth: true
                 Layout.minimumWidth: 140
                 Layout.preferredHeight: 42
@@ -1013,81 +1109,47 @@ ApplicationWindow {
                 color: window.isEditingPath ? theme.surfaceContainerHighest : theme.surfaceContainer
                 clip: true
 
-                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                MouseArea {
+                    anchors.fill: parent
+                    onDoubleClicked: window.startEditingPath()
+                    onClicked: window.defocusInputs()
+                }
 
-                // Direct Path Input (Active when isEditingPath is true)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 14
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: 4
                     spacing: 8
-                    visible: window.isEditingPath && window.activeView === "files"
+                    visible: window.isEditingPath
 
-                    SeabunnyIcon {
-                        name: "folder"
-                        size: 16
-                        color: theme.primary
-                    }
-
+                    SeabunnyIcon { name: "folder"; size: 16; color: theme.primary }
                     TextInput {
                         id: pathInput
                         Layout.fillWidth: true
                         color: theme.textMain
-                        font.pixelSize: 13
+                        font.pixelSize: theme.fs(13)
                         font.family: "monospace"
                         selectByMouse: true
                         verticalAlignment: TextInput.AlignVCenter
                         clip: true
-
-                        Keys.onReturnPressed: function(event) {
-                            window.commitPathEdit();
+                        Accessible.role: Accessible.EditableText
+                        Accessible.name: qsTr("Location")
+                        Keys.onReturnPressed: window.commitPathEdit()
+                        Keys.onEnterPressed: window.commitPathEdit()
+                        Keys.onEscapePressed: { window.isEditingPath = false; globalKeyHandler.forceActiveFocus(); }
+                        Keys.onTabPressed: function(event) {
+                            var done = core.complete_path(text, engine.show_hidden);
+                            if (done !== text) {
+                                text = done;
+                                cursorPosition = text.length;
+                            }
                             event.accepted = true;
                         }
-                        Keys.onEnterPressed: function(event) {
-                            window.commitPathEdit();
-                            event.accepted = true;
-                        }
-                        Keys.onEscapePressed: function(event) {
-                            window.endPathEdit();
-                            event.accepted = true;
-                        }
+                        onActiveFocusChanged: if (!activeFocus && window.isEditingPath) window.isEditingPath = false
                     }
-
-                    // Checkmark commit button
-                    Rectangle {
-                        width: 28
-                        height: 28
-                        radius: 14
-                        color: pathCommitMouse.containsMouse ? theme.primaryContainer : "transparent"
-                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-
-                        SeabunnyIcon {
-                            anchors.centerIn: parent
-                            name: "check"
-                            size: 14
-                            color: theme.primary
-                        }
-
-                        MouseArea {
-                            id: pathCommitMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: window.commitPathEdit()
-                        }
-                    }
+                    TopIconButton { iconName: "check"; accessibleName: qsTr("Go"); onClicked: window.commitPathEdit() }
                 }
 
-                TapHandler {
-                    enabled: !window.isEditingPath && window.activeView === "files"
-                    onTapped: {
-                        var position = breadcrumbs.mapFromItem(parent, point.position.x, point.position.y);
-                        if (!breadcrumbs.visible || breadcrumbs.indexAt(position.x + breadcrumbs.contentX, position.y + breadcrumbs.contentY) < 0)
-                            window.startEditingPath();
-                    }
-                }
-
-                // Files Breadcrumbs
                 ListView {
                     id: breadcrumbs
                     anchors.fill: parent
@@ -1096,81 +1158,65 @@ ApplicationWindow {
                     orientation: ListView.Horizontal
                     spacing: 4
                     clip: true
-                    visible: !window.isEditingPath && window.activeView === "files" && !engine.is_searching_everywhere
-
+                    visible: !window.isEditingPath && window.activeView === "files"
                     model: JSON.parse(engine.breadcrumbs_json || "[]")
+                    onCountChanged: Qt.callLater(positionViewAtEnd)
+                    interactive: contentWidth > width
+                    boundsBehavior: Flickable.StopAtBounds
 
-                    populate: Transition {
-                        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                        NumberAnimation { property: "scale"; from: 0.85; to: 1.0; duration: theme.motionDuration(170); easing.type: Easing.OutBack; easing.overshoot: 1.15 }
-                    }
                     add: Transition {
-                        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                        NumberAnimation { property: "scale"; from: 0.85; to: 1.0; duration: theme.motionDuration(170); easing.type: Easing.OutBack; easing.overshoot: 1.15 }
+                        enabled: theme.animate
+                        ParallelAnimation {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.8; to: 1.0; duration: 200; easing.type: Easing.OutBack }
+                        }
+                    }
+                    displaced: Transition {
+                        enabled: theme.animate
+                        NumberAnimation { properties: "x,y"; duration: 220; easing.type: Easing.OutCubic }
                     }
 
                     delegate: RowLayout {
+                        id: crumbDelegate
+                        required property var modelData
+                        required property int index
                         height: breadcrumbs.height
                         spacing: 4
 
                         Item {
-                            id: chipContainer
-                            height: 32
-                            width: chipRow.implicitWidth + 22
-
-                            readonly property bool isHoverDropTarget: dragManager.active && dragManager.hoverTarget === modelData.path
+                            id: chip
+                            Layout.preferredHeight: 32
+                            Layout.preferredWidth: chipRow.implicitWidth + 22
+                            readonly property var nextCrumb: breadcrumbs.model[crumbDelegate.index + 1]
+                            readonly property bool isCurrent: !crumbDelegate.modelData.is_forward && (!nextCrumb || nextCrumb.is_forward)
+                            readonly property bool dropHover: chipDrop.containsDrag
+                            Accessible.role: Accessible.Button
+                            Accessible.name: crumbDelegate.modelData.name
 
                             Rectangle {
                                 anchors.fill: parent
                                 radius: theme.radiusFull
-                                color: chipContainer.isHoverDropTarget
-                                    ? theme.primaryContainer
-                                    : (modelData.is_forward
-                                        ? "transparent"
-                                        : ((index === breadcrumbs.count - 1 && !modelData.is_forward) ? theme.secondaryContainer : theme.hoverOverlay))
-                                border.color: chipContainer.isHoverDropTarget ? theme.primary : (modelData.is_forward ? theme.outline : "transparent")
-                                border.width: (chipContainer.isHoverDropTarget || modelData.is_forward) ? 1 : 0
-                                opacity: (chipContainer.isHoverDropTarget || index === breadcrumbs.count - 1 || modelData.is_forward || cMouse.containsMouse) ? 1.0 : 0.0
-
-                                Behavior on opacity { enabled: !theme.reducedMotion;
-                                    NumberAnimation { duration: theme.durationFast }
-                                }
-                                Behavior on color { enabled: !theme.reducedMotion;
-                                    ColorAnimation { duration: theme.durationFast }
-                                }
+                                color: chip.dropHover ? theme.primaryContainer
+                                    : (crumbDelegate.modelData.is_forward ? "transparent" : (chip.isCurrent ? theme.secondaryContainer : theme.hoverOverlay))
+                                border.color: chip.dropHover ? theme.primary : (crumbDelegate.modelData.is_forward ? theme.outline : "transparent")
+                                border.width: (chip.dropHover || crumbDelegate.modelData.is_forward) ? 1 : 0
+                                opacity: (chip.dropHover || chip.isCurrent || crumbDelegate.modelData.is_forward || chipMouse.containsMouse) ? 1.0 : 0.0
+                                Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
                             }
 
                             DropArea {
+                                id: chipDrop
                                 anchors.fill: parent
+                                enabled: crumbDelegate.modelData.path.indexOf("/") === 0
                                 keys: ["text/uri-list"]
-                                onEntered: {
-                                    dragManager.hoverTarget = modelData.path;
-                                }
-                                onExited: {
-                                    if (dragManager.hoverTarget === modelData.path) {
-                                        dragManager.hoverTarget = "";
-                                    }
-                                }
                                 onDropped: function(drop) {
-                                    if (!drop.hasUrls) return;
-                                    var dest = modelData.path;
-                                    dragManager.hoverTarget = "";
-                                    var paths = [];
-                                    for (var i = 0; i < drop.urls.length; ++i) {
-                                        var u = drop.urls[i].toString();
-                                        if (u.startsWith("file://")) u = u.slice(7);
-                                        if (u === dest) continue;
-                                        paths.push(u);
-                                    }
-                                    if (paths.length === 0) return;
+                                    var dest = crumbDelegate.modelData.path;
+                                    var paths = window.urlsToPaths(drop.urls).filter(function(p) { return p !== dest; });
+                                    if (paths.length === 0)
+                                        return;
                                     var asCopy = (drop.source === dragProxy) ? dragManager.asCopy : (drop.proposedAction === Qt.CopyAction);
                                     drop.accept(asCopy ? Qt.CopyAction : Qt.MoveAction);
-                                    if (dragManager.isRmb) {
-                                        var pt = mapToItem(window.contentItem, cMouse.mouseX, cMouse.mouseY);
-                                        rmbDropMenu.showAt(pt.x, pt.y, paths, dest);
-                                    } else {
-                                        window.handleDrop(paths, dest, asCopy);
-                                    }
+                                    window.handleDrop(paths, dest, asCopy);
                                 }
                             }
 
@@ -1178,65 +1224,51 @@ ApplicationWindow {
                                 id: chipRow
                                 anchors.centerIn: parent
                                 spacing: 6
-
-                                // Iconic root place icon
-                                Item {
-                                    width: 16
-                                    height: 16
-                                    visible: modelData.is_root_place
-
-                                    SeabunnyIcon {
-                                        visible: theme.usesGlyphIcons
-                                        anchors.centerIn: parent
-                                        name: modelData.icon || "folder"
-                                        size: 15
-                                        color: (index === breadcrumbs.count - 1) ? theme.secondaryContainerFg : theme.textMain
-                                    }
-
-                                    Image {
-                                        visible: !theme.usesGlyphIcons
-                                        anchors.centerIn: parent
-                                        source: theme.resolveIcon(modelData.system_icon || "folder")
-                                        width: 15
-                                        height: 15
-                                        sourceSize.width: 32
-                                        sourceSize.height: 32
-                                        fillMode: Image.PreserveAspectFit
-                                    }
+                                SeabunnyIcon {
+                                    visible: crumbDelegate.modelData.is_root_place && theme.iconSource === "phosphor"
+                                    name: crumbDelegate.modelData.icon || "folder"
+                                    size: 15
+                                    color: chip.isCurrent ? theme.secondaryContainerFg : theme.textMain
                                 }
-
+                                Image {
+                                    visible: crumbDelegate.modelData.is_root_place && !theme.usesGlyphIcons
+                                    source: visible ? window.systemIcon(crumbDelegate.modelData.system_icon || "folder") : ""
+                                    Layout.preferredWidth: 15
+                                    Layout.preferredHeight: 15
+                                    sourceSize.width: 32
+                                    sourceSize.height: 32
+                                    fillMode: Image.PreserveAspectFit
+                                }
                                 Text {
-                                    id: chipTxt
-                                    text: modelData.name
-                                    color: modelData.is_forward
-                                        ? theme.textMuted
-                                        : ((index === breadcrumbs.count - 1) ? theme.secondaryContainerFg : (cMouse.containsMouse ? theme.textMain : theme.textMuted))
-                                    font.pixelSize: 12
-                                    font.bold: index === breadcrumbs.count - 1 && !modelData.is_forward
-
-                                    Behavior on color { enabled: !theme.reducedMotion;
-                                        ColorAnimation { duration: theme.durationFast }
-                                    }
+                                    text: crumbDelegate.modelData.name
+                                    color: crumbDelegate.modelData.is_forward ? theme.textMuted
+                                        : (chip.isCurrent ? theme.secondaryContainerFg : (chipMouse.containsMouse ? theme.textMain : theme.textMuted))
+                                    font.pixelSize: theme.fs(12)
+                                    font.bold: chip.isCurrent
                                 }
                             }
 
-                            scale: cMouse.pressed ? 0.94 : (cMouse.containsMouse ? 1.04 : 1.0)
-                            Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.8; damping: 0.3 } }
-
                             MouseArea {
-                                id: cMouse
+                                id: chipMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (modelData.path === engine.current_path) window.startEditingPath();
-                                    else engine.set_path(modelData.path);
+                                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                                onClicked: function(m) {
+                                    var path = crumbDelegate.modelData.path;
+                                    if (m.button === Qt.MiddleButton) {
+                                        window.newTab(path);
+                                    } else if (m.button === Qt.RightButton) {
+                                        var pt = mapToItem(window.contentItem, m.x, m.y);
+                                        crumbMenu.showFor(path, pt.x, pt.y);
+                                    } else {
+                                        engine.set_path(path);
+                                    }
                                 }
                             }
                         }
-
                         SeabunnyIcon {
-                            visible: index < breadcrumbs.count - 1
+                            visible: crumbDelegate.index < breadcrumbs.count - 1
                             name: "caret-right"
                             size: 11
                             color: theme.outline
@@ -1245,635 +1277,273 @@ ApplicationWindow {
                     }
                 }
 
-                // PC Breadcrumb Chip
+                // PC / Settings breadcrumbs: the place, then the settings tab.
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 12
-                    anchors.rightMargin: 12
                     spacing: 6
-                    visible: window.activeView === "pc"
+                    visible: window.activeView !== "files" && !window.isEditingPath
 
-                    Item {
-                        height: 32
-                        width: pcChipRow.implicitWidth + 22
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: theme.radiusFull
-                            color: theme.secondaryContainer
+                    RowLayout {
+                        visible: window.activeView === "settings"
+                        spacing: 6
+                        SeabunnyIcon { name: "gear"; size: 15; color: theme.textMuted }
+                        Text {
+                            text: qsTr("Settings")
+                            color: theme.textMuted
+                            font.pixelSize: theme.fs(12)
                         }
-
+                    }
+                    SeabunnyIcon {
+                        visible: window.activeView === "settings"
+                        name: "caret-right"
+                        size: 11
+                        color: theme.outline
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+                    Rectangle {
+                        Layout.preferredHeight: 30
+                        Layout.preferredWidth: curCrumb.implicitWidth + 20
+                        radius: theme.radiusFull
+                        color: theme.secondaryContainer
                         RowLayout {
-                            id: pcChipRow
+                            id: curCrumb
                             anchors.centerIn: parent
                             spacing: 6
-
                             SeabunnyIcon {
-                                visible: theme.usesGlyphIcons
-                                name: "desktop"
+                                visible: window.activeView === "pc"
+                                name: core.device_type === "laptop" ? "laptop" : "desktop"
                                 size: 15
                                 color: theme.secondaryContainerFg
                             }
-                            Image {
-                                visible: !theme.usesGlyphIcons
-                                source: theme.resolveIcon("computer-symbolic")
-                                width: 15
-                                height: 15
-                                sourceSize.width: 32
-                                sourceSize.height: 32
-                                fillMode: Image.PreserveAspectFit
-                            }
                             Text {
-                                text: engine.hostname || "This PC"
+                                text: window.activeView === "pc"
+                                    ? (core.hostname || qsTr("This PC"))
+                                    : window.settingsTabName()
                                 color: theme.secondaryContainerFg
-                                font.pixelSize: 12
+                                font.pixelSize: theme.fs(12)
                                 font.bold: true
                             }
                         }
                     }
-                }
-
-                // Settings Path Bar Header: <Settings icon> Settings > Behavior
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 6
-                    visible: window.activeView === "settings"
-
-                    // Chip 1: <Settings icon> Settings
-                    Item {
-                        id: settingsRootChip
-                        height: 32
-                        width: settingsChipRow.implicitWidth + 22
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: theme.radiusFull
-                            color: (settingsView.searchQuery.length === 0 && settingsView.activeTab === 0)
-                                ? theme.secondaryContainer
-                                : (settingsChipMouse.containsMouse ? theme.surfaceContainerHigh : "transparent")
-
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                        }
-
-                        RowLayout {
-                            id: settingsChipRow
-                            anchors.centerIn: parent
-                            spacing: 6
-
-                            SeabunnyIcon {
-                                visible: theme.usesGlyphIcons
-                                name: "gear"
-                                size: 15
-                                color: (settingsView.searchQuery.length === 0 && settingsView.activeTab === 0)
-                                    ? theme.secondaryContainerFg
-                                    : (settingsChipMouse.containsMouse ? theme.textMain : theme.textMuted)
-                            }
-
-                            Image {
-                                visible: !theme.usesGlyphIcons
-                                source: theme.resolveIcon("preferences-system-symbolic")
-                                width: 14
-                                height: 14
-                                sourceSize.width: 28
-                                sourceSize.height: 28
-                                fillMode: Image.PreserveAspectFit
-                            }
-
-                            Text {
-                                text: "Settings"
-                                color: (settingsView.searchQuery.length === 0 && settingsView.activeTab === 0)
-                                    ? theme.secondaryContainerFg
-                                    : (settingsChipMouse.containsMouse ? theme.textMain : theme.textMuted)
-                                font.pixelSize: 12
-                                font.bold: (settingsView.searchQuery.length === 0 && settingsView.activeTab === 0)
-                            }
-                        }
-
-                        scale: settingsChipMouse.pressed ? 0.94 : (settingsChipMouse.containsMouse ? 1.04 : 1.0)
-                        Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.8; damping: 0.3 } }
-
-                        MouseArea {
-                            id: settingsChipMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                searchInput.text = "";
-                                settingsView.activeTab = 0;
-                            }
-                        }
-                    }
-
-                    // Separator Caret
-                    SeabunnyIcon {
-                        name: "caret-right"
-                        size: 11
-                        color: theme.outline
-                        Layout.alignment: Qt.AlignVCenter
-                        visible: settingsView.searchQuery.length > 0 || settingsView.activeTab > 0
-                    }
-
-                    // Chip 2: Active Tab or Search Query
-                    Item {
-                        visible: settingsView.searchQuery.length > 0 || settingsView.activeTab > 0
-                        height: 32
-                        width: subTabTxt.implicitWidth + 22
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: theme.radiusFull
-                            color: theme.secondaryContainer
-                        }
-
-                        Text {
-                            id: subTabTxt
-                            anchors.centerIn: parent
-                            text: settingsView.searchQuery.length > 0
-                                ? ("Search: \"" + searchInput.text + "\"")
-                                : (settingsView.activeTab === 0 ? "Interface" : (settingsView.activeTab === 1 ? "Behavior" : (settingsView.activeTab === 2 ? "Experimental" : "About Seabunny")))
-                            color: theme.secondaryContainerFg
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                    }
-
-                    Item { Layout.fillWidth: true }
-                }
-
-                // Search Everywhere Breadcrumb: <Globe icon> Search Everywhere > [Query]
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 6
-                    visible: engine.is_searching_everywhere
-
-                    // Centring spacers fill the bar so the chips sit mid-bar
-                    // instead of leaving a large empty gap on one side.
-                    Item { Layout.fillWidth: true }
-
-                    // Chip 1: <Globe icon> Search Everywhere (Click to exit)
-                    Item {
-                        height: 32
-                        width: seChipRow.implicitWidth + 22
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: theme.radiusFull
-                            color: (searchInput.text.trim().length === 0)
-                                ? theme.secondaryContainer
-                                : (seChipMouse.containsMouse ? theme.surfaceContainerHigh : "transparent")
-
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                        }
-
-                        RowLayout {
-                            id: seChipRow
-                            anchors.centerIn: parent
-                            spacing: 6
-
-                            SeabunnyIcon {
-                                name: "globe"
-                                size: 14
-                                color: (searchInput.text.trim().length === 0)
-                                    ? theme.secondaryContainerFg
-                                    : (seChipMouse.containsMouse ? theme.textMain : theme.textMuted)
-                            }
-
-                            Text {
-                                text: "Search Everywhere"
-                                color: (searchInput.text.trim().length === 0)
-                                    ? theme.secondaryContainerFg
-                                    : (seChipMouse.containsMouse ? theme.textMain : theme.textMuted)
-                                font.pixelSize: 12
-                                font.bold: searchInput.text.trim().length === 0
-                            }
-                        }
-
-                        scale: seChipMouse.pressed ? 0.94 : (seChipMouse.containsMouse ? 1.04 : 1.0)
-                        Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.8; damping: 0.3 } }
-
-                        MouseArea {
-                            id: seChipMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                engine.clear_search_everywhere();
-                                searchInput.text = "";
-                            }
-                        }
-                    }
-
-                    // Separator Caret
-                    SeabunnyIcon {
-                        visible: searchInput.text.trim().length > 0
-                        name: "caret-right"
-                        size: 11
-                        color: theme.outline
-                        Layout.alignment: Qt.AlignVCenter
-                    }
-
-                    // Chip 2: Query Chip
-                    Item {
-                        visible: searchInput.text.trim().length > 0
-                        height: 32
-                        width: seQueryTxt.implicitWidth + 22
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: theme.radiusFull
-                            color: theme.secondaryContainer
-                        }
-
-                        Text {
-                            id: seQueryTxt
-                            anchors.centerIn: parent
-                            text: "\"" + searchInput.text.trim() + "\""
-                            color: theme.secondaryContainerFg
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                    }
-
                     Item { Layout.fillWidth: true }
                 }
             }
 
-            // Expanding Search Bar (Smoothly expands to the left when focused)
+            // Search: typing filters this folder; the pills search below
+            // this folder or the whole home folder in the background.
             Rectangle {
-                id: searchBarRect
-                visible: window.activeView !== "pc"
+                id: searchBar
                 Layout.preferredHeight: 42
+                Layout.preferredWidth: (searchInput.activeFocus || engine.is_searching_everywhere)
+                    ? (window.width < 900 ? 280 : 380) : (window.width < 900 ? 180 : 220)
+                Layout.minimumWidth: 120
                 radius: theme.radiusFull
                 color: searchInput.activeFocus ? theme.surfaceContainerHighest : theme.surfaceContainer
                 border.width: searchInput.activeFocus ? 1.5 : 0
                 border.color: theme.primary
 
-                Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-
-                property real barWidth: engine.is_searching_everywhere
-                    ? (window.width < 900 ? 240 : 320)
-                    : (searchInput.activeFocus ? (window.width < 900 ? 260 : 460) : 260)
-                Layout.preferredWidth: barWidth
-                Layout.minimumWidth: 120
-
-                Behavior on barWidth { enabled: !theme.reducedMotion;
-                    SpringAnimation { spring: 3.8; damping: 0.32 }
-                }
-
-                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
+                Behavior on Layout.preferredWidth { enabled: theme.animate; SpringAnimation { spring: 3.8; damping: 0.38 } }
+                Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
 
                 RowLayout {
+                    id: searchRow
                     anchors.fill: parent
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 10
-                    spacing: 10
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 6
+                    spacing: 6
 
-                    Item {
-                        width: 16
-                        height: 16
-                        SeabunnyIcon {
-                            visible: theme.usesGlyphIcons
-                            anchors.centerIn: parent
-                            name: "magnifying-glass"
-                            size: 16
-                            color: searchInput.activeFocus ? theme.primary : theme.outline
-                        }
-                        Image {
-                            visible: !theme.usesGlyphIcons
-                            anchors.centerIn: parent
-                            source: theme.resolveIcon("system-search")
-                            width: 16
-                            height: 16
-                            sourceSize.width: 32
-                            sourceSize.height: 32
-                            fillMode: Image.PreserveAspectFit
-                        }
+                    SeabunnyIcon {
+                        name: engine.searching ? "hourglass" : "magnifying-glass"
+                        size: 16
+                        color: searchInput.activeFocus ? theme.primary : theme.outline
                     }
 
                     TextInput {
                         id: searchInput
-                        onActiveFocusChanged: if (!activeFocus) deselect()
                         Layout.fillWidth: true
                         color: theme.textMain
-                        font.pixelSize: 13
+                        font.pixelSize: theme.fs(13)
                         selectByMouse: true
+                        clip: true
                         verticalAlignment: TextInput.AlignVCenter
+                        Accessible.role: Accessible.EditableText
+                        Accessible.name: qsTr("Search")
 
                         Text {
-                            text: window.activeView === "settings"
-                                ? "Search settings..."
-                                : (engine.is_searching_everywhere ? "Search across entire filesystem..." : "Search files...")
+                            text: window.activeView === "settings" ? qsTr("Search settings…")
+                                : (engine.is_searching_everywhere ? qsTr("Search…") : qsTr("Filter this folder…"))
                             color: theme.outline
-                            font.pixelSize: 13
+                            font.pixelSize: theme.fs(13)
                             visible: !searchInput.text && !searchInput.activeFocus
                             anchors.verticalCenter: parent.verticalCenter
                         }
 
                         onTextChanged: {
-                            if (window.switchingTab) return;
-                            window.cancelTabRestore();
-                            if (window.activeView === "pc") {
-                                // Typing search from PC pulls back to the file grid
+                            if (window.activeView === "pc")
                                 window.showFiles();
-                            }
-                            if (window.activeView === "files") {
-                                if (engine.is_searching_everywhere) {
-                                    engine.search_everywhere(searchInput.text);
-                                }
-                                if (searchInput.text.trim().length > 0) {
-                                    filesGridView.selectItem(0, false, false);
-                                }
-                            }
+                            if (window.activeView !== "files")
+                                return;
+                            if (engine.is_searching_everywhere)
+                                searchDebounce.restart();
+                            else
+                                engine.set_filter(text);
                         }
-
                         Keys.onEscapePressed: function(event) {
-                            if (searchInput.text.length > 0) {
-                                searchInput.text = "";
-                                event.accepted = true;
-                            } else if (window.isAuxView) {
-                                window.showFiles();
-                                event.accepted = true;
+                            if (text.length > 0) {
+                                text = "";
+                            } else {
+                                if (engine.is_searching_everywhere)
+                                    engine.clear_search();
+                                globalKeyHandler.forceActiveFocus();
                             }
+                            event.accepted = true;
                         }
-
                         Keys.onDownPressed: function(event) {
-                            if (window.activeView === "files") {
-                                gridContainer.moveSelection(0, 1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
+                            window.keyboardNavActive = true;
+                            window.activePane.moveSelection(0, 1, false);
+                            globalKeyHandler.forceActiveFocus();
+                            event.accepted = true;
                         }
-
-                        Keys.onUpPressed: function(event) {
-                            if (window.activeView === "files") {
-                                gridContainer.moveSelection(0, -1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                        }
-
-                        Keys.onLeftPressed: function(event) {
-                            if (window.activeView === "files" && engine.view_mode === "grid") {
-                                gridContainer.moveSelection(-1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                        }
-
-                        Keys.onRightPressed: function(event) {
-                            if (window.activeView === "files" && engine.view_mode === "grid") {
-                                gridContainer.moveSelection(1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                        }
-
                         Keys.onReturnPressed: function(event) {
-                            if (window.activeView === "files") {
-                                gridContainer.openSelected();
-                                event.accepted = true;
-                            }
-                        }
-
-                        Keys.onEnterPressed: function(event) {
-                            if (window.activeView === "files") {
-                                gridContainer.openSelected();
-                                event.accepted = true;
-                            }
+                            if (window.activePane.selectedCount === 0 && engine.item_count > 0)
+                                window.activePane.selectRow(0, false, false);
+                            window.activePane.openSelected();
+                            event.accepted = true;
                         }
                     }
 
-                    // "Search everywhere" Pop-up Pill Button (Visible when focused)
-                    Rectangle {
-                        id: everywhereBtn
-                        visible: (window.activeView === "files") && (searchInput.activeFocus || engine.is_searching_everywhere) && !engine.is_searching_everywhere
-                        height: 30
-                        width: everywhereRow.implicitWidth + 18
-                        radius: theme.radiusFull
-                        color: everywhereMouse.containsMouse ? theme.primary : theme.surfaceContainerLow
+                    // Keep the box in step with the pane: navigating clears the
+                    // filter in the backend, and each pane/tab has its own.
+                    function syncSearchBox() {
+                        if (window.activeView !== "files")
+                            return;
+                        var want = engine.is_searching_everywhere ? engine.search_query : engine.filter_text;
+                        if (searchInput.text !== want)
+                            searchInput.text = want;
+                    }
+                    Connections {
+                        target: window.engine
+                        function onFilter_textChanged() { if (!window.engine.is_searching_everywhere) searchRow.syncSearchBox(); }
+                        function onCurrent_pathChanged() { if (!window.engine.is_searching_everywhere) searchRow.syncSearchBox(); }
+                    }
+                    Connections {
+                        target: window
+                        function onActivePaneChanged() { searchRow.syncSearchBox(); }
+                    }
 
-                        Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-
-                        RowLayout {
-                            id: everywhereRow
-                            anchors.centerIn: parent
-                            spacing: 6
-
-                            SeabunnyIcon {
-                                name: "globe"
-                                size: 13
-                                color: everywhereMouse.containsMouse ? theme.primaryFg : theme.textMain
-                            }
-
-                            Text {
-                                text: "Search everywhere"
-                                color: everywhereMouse.containsMouse ? theme.primaryFg : theme.textMain
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
+                    Timer {
+                        id: searchDebounce
+                        interval: 250
+                        onTriggered: {
+                            if (searchInput.text.trim().length > 0)
+                                engine.search(searchInput.text, window.searchScope, theme.searchContents);
                         }
-
-                        MouseArea {
-                            id: everywhereMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                engine.search_everywhere(searchInput.text || "a");
-                            }
+                    }
+                    TopIconButton {
+                        id: searchSettingsBtn
+                        visible: window.activeView === "files"
+                        iconName: "sliders-horizontal"
+                        small: true
+                        accessibleName: qsTr("Search settings")
+                        onClicked: {
+                            var p = mapToItem(window.contentItem, 0, height + 4);
+                            searchSettingsMenu.openAt(p.x, p.y);
                         }
                     }
 
-                    // Exit Search Everywhere Button (When search everywhere is active)
-                    Rectangle {
-                        visible: engine.is_searching_everywhere
-                        height: 30
-                        width: closeSearchTxt.implicitWidth + 18
-                        radius: theme.radiusFull
-                        color: closeSearchMouse.containsMouse ? theme.surfaceContainerHighest : theme.surfaceContainerLow
-
-                        Text {
-                            id: closeSearchTxt
-                            anchors.centerIn: parent
-                            text: "Back to Files"
-                            color: theme.textMain
-                            font.pixelSize: 11
-                            font.bold: true
-                        }
-
-                        MouseArea {
-                            id: closeSearchMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                engine.clear_search_everywhere();
-                                searchInput.text = "";
-                            }
+                    TopIconButton {
+                        visible: engine.is_searching_everywhere || searchInput.text.length > 0
+                        iconName: "x"
+                        small: true
+                        accessibleName: qsTr("Clear search")
+                        onClicked: {
+                            searchInput.text = "";
+                            if (engine.is_searching_everywhere)
+                                engine.clear_search();
                         }
                     }
                 }
             }
-
-            // Unified View & Sort Options Button
             Rectangle {
-                id: viewDropdownBtn
-                visible: window.activeView === "files" && !engine.is_searching_everywhere
+                id: viewDropdownButton
+                visible: window.activeView === "files"
                 Layout.preferredHeight: 42
-                Layout.preferredWidth: viewDropdownRow.implicitWidth + (window.width < 900 ? 16 : 24)
+                Layout.preferredWidth: viewRow.implicitWidth + 20
                 radius: theme.radiusFull
-                color: viewDropdownMouse.containsMouse ? theme.surfaceContainerHighest : theme.surfaceContainer
-                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                scale: viewDropdownMouse.pressed ? 0.95 : 1.0
-                Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 4.0; damping: 0.3 } }
+                color: theme.surfaceContainer
+                clip: true
 
                 RowLayout {
-                    id: viewDropdownRow
+                    id: viewRow
                     anchors.centerIn: parent
-                    spacing: 7
-
-                    SeabunnyIcon {
-                        name: engine.view_mode === "list" ? "list" : "squares-four"
-                        size: 16
-                        color: theme.primary
-                    }
-
-                    Text {
-                        visible: window.width >= 900
-                        text: "View"
-                        color: theme.textMain
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-
-                    SeabunnyIcon {
-                        name: "caret-down"
-                        size: 11
-                        color: theme.outline
-                    }
-                }
-
-                MouseArea {
-                    id: viewDropdownMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        var pt = mapToItem(window.contentItem, 0, height + 6);
-                        viewMenuPopup.openAt(pt.x, pt.y);
-                    }
-                }
-            }
-
-            // Empty Trash: shown only while browsing the trash root.
-            SeabunnyButton {
-                id: emptyTrashBtn
-                visible: window.activeView === "files"
-                    && engine.trash_root.length > 0
-                    && engine.current_path === engine.trash_root
-                text: window.width < 900 ? "" : "Empty Trash"
-                icon: "trash"
-                variant: "danger"
-                onClicked: engine.empty_trash()
-            }
-        }
-
-        RowLayout {
-            visible: folderTabs.entries.length >= 2
-            Layout.fillWidth: true
-            Layout.leftMargin: 20
-            Layout.rightMargin: 20
-            spacing: 6
-
-            ListView {
-                id: tabBar
-                objectName: "folderTabBar"
-                Layout.fillWidth: true
-                Layout.preferredHeight: 38
-                orientation: ListView.Horizontal
-                spacing: 6
-                clip: true
-                model: folderTabs.entries
-                currentIndex: folderTabs.currentIndex
-                highlightMoveDuration: 0
-                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-
-                delegate: Rectangle {
-                    id: tabCard
-                    required property var modelData
-                    required property int index
-                    width: Math.max(120, Math.min(210, tabBar.width / Math.min(4, tabBar.count) - 6))
-                    height: 38
-                    radius: theme.radiusFull
-                    color: index === folderTabs.currentIndex ? theme.primaryContainer : theme.surfaceContainer
-                    border.width: tabMouse.containsMouse ? 1 : 0
-                    border.color: theme.outline
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 6
-                        spacing: 6
-                        SeabunnyIcon { name: "folder"; size: 16; color: index === folderTabs.currentIndex ? theme.primaryContainerFg : theme.textMuted }
-                        Text {
-                            Layout.fillWidth: true
-                            text: tabCard.modelData.engine.current_dir_name || "/"
-                            elide: Text.ElideRight
-                            font.pixelSize: 12
-                            color: tabCard.index === folderTabs.currentIndex ? theme.primaryContainerFg : theme.textMain
+                    spacing: 4
+                    Rectangle {
+                        width: 32
+                        height: 32
+                        radius: 16
+                        color: cycleMouse.containsMouse ? theme.hoverOverlay : "transparent"
+                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                        SeabunnyIcon {
+                            anchors.centerIn: parent
+                            name: engine.view_mode === "list" ? "list" : "squares-four"
+                            size: 16
+                            color: theme.primary
                         }
-                        Item { Layout.preferredWidth: 26; Layout.preferredHeight: 26 }
-                    }
-                    MouseArea {
-                        id: tabMouse
-                        objectName: "folderTabDrag"
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        preventStealing: true
-                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-                        property real pressX: 0
-                        property bool reordered: false
-                        onPressed: function(mouse) { reordered = false; pressX = mapToItem(tabBar, mouse.x, mouse.y).x; }
-                        onClicked: function(mouse) {
-                            if (reordered) return;
-                            if (mouse.button === Qt.MiddleButton) folderTabs.close(tabCard.index);
-                            else folderTabs.activate(tabCard.index);
+                        MouseArea {
+                            id: cycleMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: engine.set_view(engine.view_mode === "grid" ? "list" : "grid")
                         }
-                        onReleased: function(mouse) {
-                            if (mouse.button !== Qt.LeftButton) return;
-                            var delta = mapToItem(tabBar, mouse.x, mouse.y).x - pressX;
-                            if (Math.abs(delta) > tabCard.width / 2) {
-                                reordered = true;
-                                folderTabs.move(tabCard.index, Math.max(0, Math.min(folderTabs.entries.length - 1, tabCard.index + Math.round(delta / (tabCard.width + tabBar.spacing)))));
+                    }
+                    Item {
+                        implicitWidth: dropRow.implicitWidth + 10
+                        implicitHeight: 32
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 16
+                            color: dropMouse.containsMouse ? theme.hoverOverlay : "transparent"
+                            Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                        }
+
+                        RowLayout {
+                            id: dropRow
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Text { visible: window.width >= 900; text: qsTr("View"); color: theme.textMain; font.pixelSize: theme.fs(12); font.bold: true }
+                            SeabunnyIcon { name: viewMenuPopup.visible ? "caret-up" : "caret-down"; size: 11; color: theme.outline }
+                        }
+
+                        MouseArea {
+                            id: dropMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (viewMenuPopup.visible) {
+                                    viewMenuPopup.close();
+                                } else {
+                                    var pt = mapToItem(window.contentItem, viewDropdownButton.width - viewMenuPopup.width, viewDropdownButton.height + 6);
+                                    viewMenuPopup.openAt(pt.x, pt.y);
+                                }
                             }
                         }
-                        ToolTip.visible: containsMouse
-                        ToolTip.delay: 600
-                        ToolTip.text: tabCard.modelData.engine.current_path
-                    }
-                    MouseArea {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 26
-                        height: 26
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: folderTabs.close(tabCard.index)
-                        SeabunnyIcon { anchors.centerIn: parent; name: "x"; size: 13; color: theme.textMuted }
                     }
                 }
             }
+
             SeabunnyButton {
-                text: ""
-                icon: "plus"
-                enabled: folderTabs.entries.length < folderTabs.limit
-                onClicked: window.openFolderTab(engine.current_path, false)
+                visible: window.activeView === "files" && engine.location_kind === "trash" && engine.item_count > 0
+                text: window.width < 900 ? "" : qsTr("Empty Trash")
+                icon: "trash"
+                variant: "danger"
+                onClicked: window.confirmEmptyTrash()
             }
         }
-
-        // ==========================================
-        // MAIN BODY (Expandable Rail + Stage)
-        // ==========================================
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -1882,2497 +1552,414 @@ ApplicationWindow {
             Layout.bottomMargin: 20
             spacing: 16
 
-            // Expandable Navigation Rail
-            Rectangle {
-                id: navRailRect
+            Sidebar {
+                id: sidebar
                 Layout.fillHeight: true
-                property real railWidth: window.sidebarExpanded ? Math.min(window.expandedSidebarWidth, window.maximumSidebarWidth) : 68
-                Layout.preferredWidth: railWidth
-                radius: theme.radiusXl
-                color: theme.surfaceContainer
-                clip: true
-
-                Behavior on railWidth {
-                    enabled: !window.resizingSidebar && !theme.reducedMotion
-                    NumberAnimation {
-                        duration: theme.motionDuration(230)
-                        easing.type: Easing.OutCubic
+                Layout.preferredWidth: implicitWidth
+                Behavior on Layout.preferredWidth { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.35 } }
+                activeId: {
+                    if (window.activeView === "settings")
+                        return "settings";
+                    if (window.activeView === "pc")
+                        return "pc";
+                    var kind = engine.location_kind;
+                    if (kind === "trash" || kind === "recent" || kind === "starred")
+                        return kind;
+                    for (var i = 0; i < places.length; ++i) {
+                        if (places[i].path && places[i].path === engine.current_path)
+                            return places[i].id;
                     }
+                    return "";
                 }
-
-                // Sliding Active Pill Indicator (glides between Places and Settings)
-                Rectangle {
-                    id: navIndicator
-                    height: 44
-                    radius: 22
-                    x: 12
-                    width: window.sidebarExpanded ? (navRailRect.width - 24) : 44
-                    color: theme.primaryContainer
-                    opacity: window.activeView !== "settings" && (window.currentNavIndex < 0
-                        || window.currentNavIndex * 52 < navRailArea.contentY
-                        || window.currentNavIndex * 52 + 44 > navRailArea.contentY + navRailArea.height)
-                        ? 0 : (engine.is_searching_everywhere ? 0.35 : 1.0)
-                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                    z: 0
-
-                    y: {
-                        if (window.activeView === "settings") {
-                            return navRailCol.y + settingsBtnItem.y;
-                        } else {
-                            return navRailCol.y + navRailArea.y + window.currentNavIndex * 52 - navRailArea.contentY;
+                onPlaceClicked: function(place, inNewTab) {
+                    if (place.kind === "pc") {
+                        if (inNewTab) {
+                            window.newTab("pc://");
+                            return;
                         }
+                        window.openPc();
+                        return;
                     }
-
-                    Behavior on y { enabled: !theme.reducedMotion;
-                        SpringAnimation {
-                            spring: 3.5
-                            damping: 0.35
-                            epsilon: 0.25
+                    if (place.kind === "smb") {
+                        if (inNewTab && place.connected && place.path) {
+                            window.newTab(place.path);
+                            return;
                         }
+                        window.showFiles();
+                        searchInput.text = "";
+                        if (place.connected && place.path)
+                            engine.set_path(place.path);
+                        else
+                            core.connect_smb(place.profile_id, "", false);
+                        return;
                     }
-                    Behavior on width { enabled: !theme.reducedMotion;
-                        SpringAnimation {
-                            spring: 3.5
-                            damping: 0.35
-                        }
+                    if (inNewTab && place.path) {
+                        window.newTab(place.path);
+                        return;
                     }
-                    Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationNormal } }
-
-                    ParallelAnimation {
-                        id: indicatorExpandAnim
-                        SequentialAnimation {
-                            PauseAnimation { duration: theme.motionDuration(60 + window.currentNavIndex * 40)}
-                            NumberAnimation {
-                                target: navIndicator
-                                property: "width"
-                                from: 44
-                                to: navRailRect.width - 24
-                                duration: theme.motionDuration(210)
-                                easing.type: Easing.OutBack
-                                easing.overshoot: 1.25
-                            }
-                        }
-                    }
-
-                    ParallelAnimation {
-                        id: indicatorCollapseAnim
-                        SequentialAnimation {
-                            PauseAnimation { duration: theme.motionDuration(Math.max(0, (navRepeater.count - 1 - window.currentNavIndex)) * 22)}
-                            NumberAnimation {
-                                target: navIndicator
-                                property: "width"
-                                from: navIndicator.width
-                                to: 44
-                                duration: theme.motionDuration(130)
-                                easing.type: Easing.InCubic
-                            }
-                        }
-                    }
+                    window.showFiles();
+                    searchInput.text = "";
+                    if (place.kind === "trash")
+                        engine.open_trash();
+                    else if (place.kind === "recent")
+                        engine.open_recent();
+                    else if (place.kind === "starred")
+                        engine.open_starred();
+                    else if (place.missing)
+                        window.toast("error", qsTr("“%1” no longer exists").arg(place.path));
+                    else
+                        engine.set_path(place.path);
                 }
-
-                ColumnLayout {
-                    id: navRailCol
-                    anchors.fill: parent
-                    anchors.topMargin: 14
-                    anchors.bottomMargin: 14
-                    spacing: 8
-                    z: 1
-
-                    // Sidebar Expand Toggle Button
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 44
-
-                        Rectangle {
-                            width: 44
-                            height: 44
-                            radius: 22
-                            x: 12
-                            color: toggleMouse.containsMouse ? theme.surfaceContainerHigh : "transparent"
-
-                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-
-                            SeabunnyIcon {
-                                anchors.centerIn: parent
-                                name: window.sidebarExpanded ? "sidebar" : "sidebar-simple"
-                                size: 20
-                                color: theme.textMain
-                            }
-
-                            MouseArea {
-                                id: toggleMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    window.sidebarExpanded = !window.sidebarExpanded;
-                                    if (window.sidebarExpanded) {
-                                        indicatorCollapseAnim.stop();
-                                        indicatorExpandAnim.restart();
-                                        for (var i = 0; i < navRepeater.count; i++) {
-                                            var it = navRepeater.itemAt(i);
-                                            if (it && typeof it.playExpand === "function") {
-                                                it.playExpand(i);
-                                            }
-                                        }
-                                        if (settingsBtnItem && typeof settingsBtnItem.playExpand === "function") {
-                                            settingsBtnItem.playExpand(navRepeater.count);
-                                        }
-                                    } else {
-                                        indicatorExpandAnim.stop();
-                                        indicatorCollapseAnim.restart();
-                                        if (settingsBtnItem && typeof settingsBtnItem.playCollapse === "function") {
-                                            settingsBtnItem.playCollapse(0);
-                                        }
-                                        for (var j = 0; j < navRepeater.count; j++) {
-                                            var btn = navRepeater.itemAt(j);
-                                            if (btn && typeof btn.playCollapse === "function") {
-                                                var revIdx = (navRepeater.count - j);
-                                                btn.playCollapse(revIdx);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Places Navigation List
-                    Flickable {
-                        id: navRailArea
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        contentHeight: navColumn.implicitHeight
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                        property real dragY: -1
-                        function trackDrag(drag, item) { dragY = item.mapToItem(navRailArea, drag.x, drag.y).y; }
-
-                        Timer {
-                            interval: 30
-                            running: navRailArea.dragY >= 0
-                            repeat: true
-                            onTriggered: {
-                                var delta = navRailArea.dragY < 28 ? -12 : navRailArea.dragY > navRailArea.height - 28 ? 12 : 0;
-                                navRailArea.contentY = Math.max(0, Math.min(Math.max(0, navRailArea.contentHeight - navRailArea.height), navRailArea.contentY + delta));
-                            }
-                        }
-
-                        DropArea {
-                            id: sidebarBackgroundDrop
-                            parent: navRailArea
-                            anchors.fill: parent
-                            z: -1
-                            onEntered: function(drag) {
-                                drag.accepted = drag.source === sidebarDragProxy || drag.source === dragProxy || drag.hasUrls;
-                                if (drag.accepted) navRailArea.trackDrag(drag, sidebarBackgroundDrop);
-                            }
-                            onPositionChanged: function(drag) { navRailArea.trackDrag(drag, sidebarBackgroundDrop); }
-                            onExited: { navRailArea.dragY = -1; }
-                            onDropped: function(drop) {
-                                navRailArea.dragY = -1;
-                                window.dropOnSidebar(drop, null, "after");
-                            }
-                        }
-
-                        Column {
-                            id: navColumn
-                            width: navRailArea.width
-                            spacing: 8
-
-                            Repeater {
-                                id: navRepeater
-                                model: Sidebar.arrange([
-                                    { name: engine.hostname || "PC", iconName: engine.device_type === "laptop" ? "laptop" : "desktop", systemIcon: "computer-symbolic", view: "pc" },
-                                    { name: "Home", iconName: "house", systemIcon: "user-home-symbolic", pathSuffix: "", view: "files" },
-                                    { name: "Documents", iconName: "file-text", systemIcon: "x-office-document-symbolic", pathSuffix: "Documents", view: "files" },
-                                    { name: "Downloads", iconName: "download", systemIcon: "folder-download-symbolic", pathSuffix: "Downloads", view: "files" },
-                                    { name: "Pictures", iconName: "image", systemIcon: "image-x-generic-symbolic", pathSuffix: "Pictures", view: "files" },
-                                    { name: "Music", iconName: "music", systemIcon: "audio-x-generic-symbolic", pathSuffix: "Music", view: "files" },
-                                    { name: "Videos", iconName: "video", systemIcon: "video-x-generic-symbolic", pathSuffix: "Videos", view: "files" },
-                                    { name: "Projects", iconName: "code", systemIcon: "utilities-terminal-symbolic", pathSuffix: "Projects", view: "files" },
-                                    { name: "Trash", iconName: "trash", systemIcon: "user-trash-symbolic", view: "files", trashRoot: true }
-                                ], window.favoriteItems, window.sidebarLayout).filter(function(item) { return !window.chooserMode || (item.view !== "pc" && !item.trashRoot); })
-
-                                delegate: Item {
-                                    id: navBtn
-                                    width: navRailArea.width
-                                    height: 44
-
-                                    readonly property bool isSelected: window.activeView === modelData.view && window.currentNavIndex === index
-                                    readonly property bool isHovered: btnMouse.containsMouse
-
-                                    DropArea {
-                                        id: sidebarRowDrop
-                                        anchors.fill: parent
-                                        property string edge: ""
-                                        function updatePosition(drag) {
-                                            navRailArea.trackDrag(drag, sidebarRowDrop);
-                                            edge = drag.y < 12 ? "before" : drag.y > height - 12 ? "after" : "";
-                                            if (drag.source === sidebarDragProxy) edge = drag.y < height / 2 ? "before" : "after";
-                                            dragManager.hoverTarget = edge ? "" : window.sidebarPath(modelData);
-                                        }
-                                        onEntered: function(drag) {
-                                            drag.accepted = drag.source === sidebarDragProxy || drag.source === dragProxy || drag.hasUrls;
-                                            if (drag.accepted) updatePosition(drag);
-                                        }
-                                        onPositionChanged: function(drag) { updatePosition(drag); }
-                                        onExited: { dragManager.hoverTarget = ""; navRailArea.dragY = -1; }
-                                        onDropped: function(drop) {
-                                            navRailArea.dragY = -1;
-                                            window.dropOnSidebar(drop, modelData, edge);
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        radius: 16
-                                        color: theme.primaryContainer
-                                        opacity: 0.65
-                                        visible: sidebarRowDrop.containsDrag && !sidebarRowDrop.edge
-                                    }
-                                    Rectangle {
-                                        x: 8
-                                        y: sidebarRowDrop.edge === "after" ? parent.height - 2 : 0
-                                        width: parent.width - 16
-                                        height: 3
-                                        radius: 1.5
-                                        color: theme.primary
-                                        visible: sidebarRowDrop.containsDrag && sidebarRowDrop.edge.length > 0
-                                    }
-
-                                    Rectangle {
-                                        width: window.sidebarExpanded ? (parent.width - 24) : 44
-                                        height: 44
-                                        radius: 22
-                                        x: 12
-                                        color: theme.hoverOverlay
-                                        opacity: (!navBtn.isSelected && navBtn.isHovered) ? 1.0 : 0.0
-
-                                        Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                        Behavior on width { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.35 } }
-                                    }
-
-                                    Item {
-                                        id: iconBox
-                                        width: 44
-                                        height: 44
-                                        x: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        transformOrigin: Item.Center
-
-                                        NumberAnimation {
-                                            id: iconBounceAnim
-                                            target: iconBox
-                                            property: "scale"
-                                            from: 1.0
-                                            to: 1.25
-                                            duration: theme.motionDuration(120)
-                                            easing.type: Easing.OutBack
-                                            onFinished: iconSettleAnim.start()
-                                        }
-                                        NumberAnimation {
-                                            id: iconSettleAnim
-                                            target: iconBox
-                                            property: "scale"
-                                            from: 1.25
-                                            to: 1.0
-                                            duration: theme.motionDuration(120)
-                                            easing.type: Easing.OutCubic
-                                        }
-
-                                        SeabunnyIcon {
-                                            visible: theme.usesGlyphIcons || !!modelData.customIcon
-                                            anchors.centerIn: parent
-                                            name: modelData.iconName
-                                            size: 20
-                                            color: navBtn.isSelected ? theme.primaryContainerFg : (navBtn.isHovered ? theme.textMain : theme.textMuted)
-
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                        }
-
-                                        Image {
-                                            visible: !theme.usesGlyphIcons && !modelData.customIcon
-                                            anchors.centerIn: parent
-                                            source: theme.resolveIcon(modelData.systemIcon)
-                                            width: 20
-                                            height: 20
-                                            sourceSize.width: 40
-                                            sourceSize.height: 40
-                                            fillMode: Image.PreserveAspectFit
-                                        }
-                                    }
-
-                                    Item {
-                                        id: labelContainer
-                                        anchors.left: iconBox.right
-                                        anchors.leftMargin: 8
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        height: 24
-
-                                        clip: true
-                                        opacity: window.sidebarExpanded ? 1.0 : 0.0
-                                        scale: window.sidebarExpanded ? 1.0 : 0.3
-                                        transformOrigin: Item.Left
-
-                                        transform: Translate {
-                                            id: labelTranslate
-                                            x: window.sidebarExpanded ? 0 : -16
-                                        }
-
-                                        Text {
-                                            anchors.fill: parent
-                                            verticalAlignment: Text.AlignVCenter
-                                            text: modelData.name
-                                            color: navBtn.isSelected ? theme.primaryContainerFg : (navBtn.isHovered ? theme.textMain : theme.textMuted)
-                                            font.pixelSize: 13
-                                            font.bold: navBtn.isSelected
-                                            elide: Text.ElideRight
-
-                                            Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                        }
-                                    }
-
-                                    ParallelAnimation {
-                                        id: labelExpandAnim
-                                        property int delayMs: 0
-
-                                        SequentialAnimation {
-                                            PauseAnimation { duration: theme.motionDuration(labelExpandAnim.delayMs)}
-                                            ParallelAnimation {
-                                                ScriptAction { script: iconBounceAnim.restart() }
-                                                NumberAnimation {
-                                                    target: labelContainer
-                                                    property: "opacity"
-                                                    from: 0.0
-                                                    to: 1.0
-                                                    duration: theme.motionDuration(180)
-                                                    easing.type: Easing.OutCubic
-                                                }
-                                                NumberAnimation {
-                                                    target: labelContainer
-                                                    property: "scale"
-                                                    from: 0.3
-                                                    to: 1.0
-                                                    duration: theme.motionDuration(230)
-                                                    easing.type: Easing.OutBack
-                                                    easing.overshoot: 1.5
-                                                }
-                                                NumberAnimation {
-                                                    target: labelTranslate
-                                                    property: "x"
-                                                    from: -16
-                                                    to: 0
-                                                    duration: theme.motionDuration(210)
-                                                    easing.type: Easing.OutBack
-                                                    easing.overshoot: 1.2
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    ParallelAnimation {
-                                        id: labelCollapseAnim
-                                        property int delayMs: 0
-
-                                        SequentialAnimation {
-                                            PauseAnimation { duration: theme.motionDuration(labelCollapseAnim.delayMs)}
-                                            ParallelAnimation {
-                                                NumberAnimation {
-                                                    target: labelContainer
-                                                    property: "opacity"
-                                                    from: labelContainer.opacity
-                                                    to: 0.0
-                                                    duration: theme.motionDuration(110)
-                                                    easing.type: Easing.InCubic
-                                                }
-                                                NumberAnimation {
-                                                    target: labelContainer
-                                                    property: "scale"
-                                                    from: labelContainer.scale
-                                                    to: 0.3
-                                                    duration: theme.motionDuration(130)
-                                                    easing.type: Easing.InBack
-                                                    easing.overshoot: 1.2
-                                                }
-                                                NumberAnimation {
-                                                    target: labelTranslate
-                                                    property: "x"
-                                                    from: labelTranslate.x
-                                                    to: -16
-                                                    duration: theme.motionDuration(130)
-                                                    easing.type: Easing.InCubic
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    function playExpand(idx) {
-                                        labelCollapseAnim.stop();
-                                        labelExpandAnim.stop();
-                                        labelContainer.opacity = 0.0;
-                                        labelContainer.scale = 0.3;
-                                        labelTranslate.x = -16;
-                                        labelExpandAnim.delayMs = 60 + idx * 35;
-                                        labelExpandAnim.start();
-                                    }
-
-                                    function playCollapse(reverseIdx) {
-                                        labelExpandAnim.stop();
-                                        labelCollapseAnim.stop();
-                                        labelCollapseAnim.delayMs = reverseIdx * 20;
-                                        labelCollapseAnim.start();
-                                    }
-
-                                    MouseArea {
-                                        id: btnMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                        preventStealing: true
-                                        drag.target: sidebarDragProxy
-                                        drag.smoothed: false
-                                        property bool dragged: false
-                                        ToolTip.visible: containsMouse
-                                        ToolTip.text: (modelData.path || modelData.name) + "\nDrag to reorder; drop on center to move, edges to pin"
-                                        onPressed: function(mouse) {
-                                            dragged = false;
-                                            if (mouse.button !== Qt.LeftButton) return;
-                                            sidebarDragProxy.sidebarId = modelData.id;
-                                            sidebarDragProxy.label = modelData.name;
-                                            var position = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                            sidebarDragProxy.x = position.x - 16;
-                                            sidebarDragProxy.y = position.y - 16;
-                                        }
-                                        drag.onActiveChanged: { if (drag.active && (pressedButtons & Qt.LeftButton)) sidebarDragProxy.Drag.active = true; }
-                                        onPositionChanged: function(mouse) {
-                                            if (drag.active && (pressedButtons & Qt.LeftButton)) {
-                                                dragged = true;
-                                                var position = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                                sidebarDragProxy.x = position.x - 16;
-                                                sidebarDragProxy.y = position.y - 16;
-                                                sidebarDragProxy.Drag.active = true;
-                                            }
-                                        }
-                                        onReleased: {
-                                            if (sidebarDragProxy.Drag.active) sidebarDragProxy.Drag.drop();
-                                            sidebarDragProxy.Drag.active = false;
-                                        }
-                                        onCanceled: { sidebarDragProxy.Drag.cancel(); }
-                                        onClicked: function(mouse) {
-                                            if (dragged) return;
-                                            if (mouse.button === Qt.RightButton) {
-                                                favoriteMenu.showFor(modelData, navBtn);
-                                                return;
-                                            }
-                                            engine.clear_search_everywhere();
-                                            window.currentNavIndex = index;
-                                            if (modelData.view === "pc") {
-                                                window.activeView = "pc";
-                                                engine.load_drives();
-                                                engine.refresh_frequent_dirs();
-                                            } else if (modelData.trashRoot) {
-                                                window.currentPlaceIndex = index;
-                                                window.activeView = "files";
-                                                engine.set_path(engine.trash_root);
-                                            } else {
-                                                window.currentPlaceIndex = index;
-                                                window.activeView = "files";
-                                                engine.set_path(modelData.path || engine.place_path(modelData.pathSuffix || ""));
-                                                window.syncPlaces();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Item {
-                                width: navRailArea.width
-                                height: 8
-                                objectName: "sidebarPinTarget"
-                                DropArea {
-                                    id: sidebarPinDrop
-                                    anchors.fill: parent
-                                    onEntered: function(drag) {
-                                        drag.accepted = drag.source === sidebarDragProxy || drag.source === dragProxy || drag.hasUrls;
-                                        if (drag.accepted) navRailArea.trackDrag(drag, sidebarPinDrop);
-                                    }
-                                    onPositionChanged: function(drag) { navRailArea.trackDrag(drag, sidebarPinDrop); }
-                                    onExited: { navRailArea.dragY = -1; }
-                                    onDropped: function(drop) {
-                                        navRailArea.dragY = -1;
-                                        window.dropOnSidebar(drop, null, "after");
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    acceptedButtons: Qt.RightButton
-                                    onClicked: { favoriteMenu.showRestore(parent); }
-                                    ToolTip.visible: containsMouse
-                                    hoverEnabled: true
-                                    ToolTip.text: "Drop folders here to pin. Right-click to restore hidden places."
-                                }
-                            }
-                        }
-                    }
-
-                    // Settings Button
-                    Item {
-                        id: settingsBtnItem
-                        visible: !window.chooserMode
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 44
-
-                        readonly property bool isSettingsActive: window.activeView === "settings"
-
-                        Rectangle {
-                            width: window.sidebarExpanded ? (parent.width - 24) : 44
-                            height: 44
-                            radius: 22
-                            x: 12
-                            color: theme.hoverOverlay
-                            opacity: settingsMouse.containsMouse ? 1.0 : 0.0
-
-                            Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                            Behavior on width { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.35 } }
-                        }
-
-                        Item {
-                            id: settingsIconBox
-                            width: 44
-                            height: 44
-                            x: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            transformOrigin: Item.Center
-
-                            NumberAnimation {
-                                id: settingsBounceAnim
-                                target: settingsIconBox
-                                property: "scale"
-                                from: 1.0
-                                to: 1.25
-                                duration: theme.motionDuration(120)
-                                easing.type: Easing.OutBack
-                                onFinished: settingsSettleAnim.start()
-                            }
-                            NumberAnimation {
-                                id: settingsSettleAnim
-                                target: settingsIconBox
-                                property: "scale"
-                                from: 1.25
-                                to: 1.0
-                                duration: theme.motionDuration(120)
-                                easing.type: Easing.OutCubic
-                            }
-
-                            SeabunnyIcon {
-                                visible: theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                name: "gear"
-                                size: 20
-                                color: settingsBtnItem.isSettingsActive ? theme.primaryContainerFg : (settingsMouse.containsMouse ? theme.textMain : theme.textMuted)
-
-                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                            }
-
-                            Image {
-                                visible: !theme.usesGlyphIcons
-                                anchors.centerIn: parent
-                                source: theme.resolveIcon("preferences-system-symbolic")
-                                width: 20
-                                height: 20
-                                sourceSize.width: 40
-                                sourceSize.height: 40
-                                fillMode: Image.PreserveAspectFit
-                            }
-                        }
-
-                        Item {
-                            id: settingsLabelContainer
-                            anchors.left: settingsIconBox.right
-                            anchors.leftMargin: 8
-                            anchors.right: parent.right
-                            anchors.rightMargin: 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            height: 24
-
-                            clip: true
-                            opacity: window.sidebarExpanded ? 1.0 : 0.0
-                            scale: window.sidebarExpanded ? 1.0 : 0.3
-                            transformOrigin: Item.Left
-
-                            transform: Translate {
-                                id: settingsLabelTranslate
-                                x: window.sidebarExpanded ? 0 : -16
-                            }
-
-                            Text {
-                                anchors.fill: parent
-                                verticalAlignment: Text.AlignVCenter
-                                text: "Settings"
-                                color: settingsBtnItem.isSettingsActive ? theme.primaryContainerFg : (settingsMouse.containsMouse ? theme.textMain : theme.textMuted)
-                                font.pixelSize: 13
-                                font.bold: settingsBtnItem.isSettingsActive
-                                elide: Text.ElideRight
-
-                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                            }
-                        }
-
-                        ParallelAnimation {
-                            id: settingsExpandAnim
-                            property int delayMs: 0
-
-                            SequentialAnimation {
-                                PauseAnimation { duration: theme.motionDuration(settingsExpandAnim.delayMs)}
-                                ParallelAnimation {
-                                    ScriptAction { script: settingsBounceAnim.restart() }
-                                    NumberAnimation {
-                                        target: settingsLabelContainer
-                                        property: "opacity"
-                                        from: 0.0
-                                        to: 1.0
-                                        duration: theme.motionDuration(180)
-                                        easing.type: Easing.OutCubic
-                                    }
-                                    NumberAnimation {
-                                        target: settingsLabelContainer
-                                        property: "scale"
-                                        from: 0.3
-                                        to: 1.0
-                                        duration: theme.motionDuration(230)
-                                        easing.type: Easing.OutBack
-                                        easing.overshoot: 1.5
-                                    }
-                                    NumberAnimation {
-                                        target: settingsLabelTranslate
-                                        property: "x"
-                                        from: -16
-                                        to: 0
-                                        duration: theme.motionDuration(210)
-                                        easing.type: Easing.OutBack
-                                        easing.overshoot: 1.2
-                                    }
-                                }
-                            }
-                        }
-
-                        ParallelAnimation {
-                            id: settingsCollapseAnim
-                            property int delayMs: 0
-
-                            SequentialAnimation {
-                                PauseAnimation { duration: theme.motionDuration(settingsCollapseAnim.delayMs)}
-                                ParallelAnimation {
-                                    NumberAnimation {
-                                        target: settingsLabelContainer
-                                        property: "opacity"
-                                        from: settingsLabelContainer.opacity
-                                        to: 0.0
-                                        duration: theme.motionDuration(110)
-                                        easing.type: Easing.InCubic
-                                    }
-                                    NumberAnimation {
-                                        target: settingsLabelContainer
-                                        property: "scale"
-                                        from: settingsLabelContainer.scale
-                                        to: 0.3
-                                        duration: theme.motionDuration(130)
-                                        easing.type: Easing.InBack
-                                        easing.overshoot: 1.2
-                                    }
-                                    NumberAnimation {
-                                        target: settingsLabelTranslate
-                                        property: "x"
-                                        from: settingsLabelTranslate.x
-                                        to: -16
-                                        duration: theme.motionDuration(130)
-                                        easing.type: Easing.InCubic
-                                    }
-                                }
-                            }
-                        }
-
-                        function playExpand(idx) {
-                            settingsCollapseAnim.stop();
-                            settingsExpandAnim.stop();
-                            settingsLabelContainer.opacity = 0.0;
-                            settingsLabelContainer.scale = 0.3;
-                            settingsLabelTranslate.x = -16;
-                            settingsExpandAnim.delayMs = 60 + idx * 35;
-                            settingsExpandAnim.start();
-                        }
-
-                        function playCollapse(reverseIdx) {
-                            settingsExpandAnim.stop();
-                            settingsCollapseAnim.stop();
-                            settingsCollapseAnim.delayMs = reverseIdx * 20;
-                            settingsCollapseAnim.start();
-                        }
-
-                        MouseArea {
-                            id: settingsMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                engine.clear_search_everywhere();
-                                if (window.activeView === "settings") {
-                                    window.showFiles();
-                                } else {
-                                    if (!window.chooserMode) window.activeView = "settings";
-                                }
-                            }
-                        }
-                    }
+                onSettingsClicked: {
+                    window.openSettings();
                 }
+                onPlaceMenuRequested: function(place, x, y) { placeMenu.showFor(place, x, y); }
+                onSidebarMenuRequested: function(x, y) { sidebarMenu.showAt(x, y); }
+                Component.onCompleted: Qt.callLater(sidebar.updateHighlight)
             }
 
-            // ==========================================
-            // MAIN CONTENT STAGE
-            // ==========================================
-            Rectangle {
-                id: mainStage
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: theme.radiusXl
-                color: theme.surfaceContainerLow
-                clip: true
-                // Visible focus ring while the grid/list is driven by the keyboard.
-                border.width: window.keyboardNavActive ? 2 : 0
-                border.color: theme.primary
-                Behavior on border.width { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(140); easing.type: Easing.OutCubic } }
+                spacing: 8
 
-                // Shared content wrapper for dir/settings transition animation
-                Item {
-                    id: mainStageContent
-                    anchors.fill: parent
+                // Tab strip sits to the right of the sidebar, moving only mainStage down!
+                ListView {
+                    id: tabStrip
+                    visible: window.tabs.length > 1
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible ? 36 : 0
+                    orientation: ListView.Horizontal
+                    spacing: 8
+                    clip: true
+                    model: window.tabs.length
+                    Accessible.role: Accessible.PageTabList
 
-                    transform: [
-                        Translate {
-                            id: stageTranslate
-                            y: 0
-                        },
-                        Scale {
-                            id: stageScale
-                            origin.x: mainStageContent.width / 2
-                            origin.y: 0
-                            xScale: 1.0
-                            yScale: 1.0
-                        }
-                    ]
-
-                // VIEW 1: FILES BROWSER
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 22
-                    spacing: 14
-                    visible: window.activeView === "files"
-
-                    // Directory Hero Header & Item/Selection Count
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 10
-
-                        Text {
-                            id: dirHeroTitle
-                            text: engine.is_searching_everywhere ? "Searching Everywhere" : engine.current_dir_name
-                            color: theme.textMain
-                            font.pixelSize: 26
-                            font.bold: true
-                            font.letterSpacing: -0.5
-                            elide: Text.ElideRight
-                            Layout.maximumWidth: Math.max(120, mainStage.width - 220)
-
-                            transform: Translate { id: dirHeroTrans; x: 0 }
-
-                            onTextChanged: dirHeroAnim.restart()
-
-                            SequentialAnimation {
-                                id: dirHeroAnim
-                                ParallelAnimation {
-                                    NumberAnimation { target: dirHeroTitle; property: "opacity"; from: 0.2; to: 1.0; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                                    NumberAnimation { target: dirHeroTrans; property: "x"; from: -8; to: 0; duration: theme.motionDuration(180); easing.type: Easing.OutCubic }
-                                }
-                            }
-                        }
-
-                        Item { Layout.fillWidth: true }
-
-                        // Selection Count Badge
-                        Rectangle {
-                            visible: filesGridView.selectedCount > 0
-                            height: 28
-                            width: selLabel.implicitWidth + 20
-                            radius: theme.radiusFull
-                            color: theme.primaryContainer
-
-                            Text {
-                                id: selLabel
-                                anchors.centerIn: parent
-                                text: filesGridView.selectedCount + " selected"
-                                color: theme.primaryContainerFg
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
-                        }
-
-                        SeabunnyButton {
-                            objectName: "archiveExtractButton"
-                            visible: engine.archive_path.length > 0
-                            text: engine.archive_busy ? "Extracting…" : "Extract"
-                            icon: "archive"
-                            enabled: !engine.archive_busy && !engine.is_loading
-                            onClicked: window.extractArchiveSelection()
-                        }
-
-                        // Total Items Badge
-                        Rectangle {
-                            height: 28
-                            width: countLabel.implicitWidth + 18
-                            radius: theme.radiusFull
-                            color: theme.surfaceContainerHigh
-
-                            Text {
-                                id: countLabel
-                                anchors.centerIn: parent
-                                text: {
-                                    var count = gridContainer.allTargetItems ? gridContainer.allTargetItems.length : 0;
-                                    if (engine.is_searching_everywhere) {
-                                        return count + " results";
-                                    }
-                                    return count + " items";
-                                }
-                                color: theme.textMuted
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
+                    add: Transition {
+                        enabled: theme.animate
+                        ParallelAnimation {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 200 }
+                            NumberAnimation { property: "scale"; from: 0.7; to: 1.0; duration: 220; easing.type: Easing.OutBack }
                         }
                     }
-
-                    Text {
-                        Layout.fillWidth: true
-                        visible: engine.navigation_error.length > 0 || engine.is_loading || engine.archive_status.length > 0
-                        text: engine.navigation_error || (engine.is_loading ? "Loading folder…" : engine.archive_status)
-                        color: engine.navigation_error ? theme.danger : theme.textMuted
-                        wrapMode: Text.Wrap
+                    displaced: Transition {
+                        enabled: theme.animate
+                        NumberAnimation { properties: "x,y"; duration: 200; easing.type: Easing.OutCubic }
                     }
 
-                    // File Grid Stage
-                    Item {
-                        id: gridContainer
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
+                    delegate: Rectangle {
+                        id: tabDelegate
+                        required property int index
+                        readonly property bool current: index === window.currentTab
+                        readonly property bool isSplit: current ? window.splitView
+                            : !!(window.tabs[index] && window.tabs[index].split)
 
-                        property var selectedIndices: ({})
-                        property int selectedCount: Object.keys(selectedIndices).length
-                        property int lastSelectedIndex: -1
-                        property int anchorIndex: -1
+                        readonly property string leftName: current
+                            ? (window.activeView === "settings" ? qsTr("Settings") : (window.activeView === "pc" ? (core.hostname || qsTr("This PC")) : pane0.engine.current_dir_name))
+                            : (window.tabs[index] ? (window.tabs[index].title || qsTr("Tab")) : "")
+                        readonly property string rightName: current ? (pane1Loader.item ? pane1Loader.item.engine.current_dir_name : (window.tabs[index] ? window.tabs[index].rightTitle || qsTr("Split") : qsTr("Split")))
+                            : (window.tabs[index] ? (window.tabs[index].rightTitle || qsTr("Split")) : qsTr("Split"))
 
-                        property var allTargetItems: []
-                        property var displayedItems: []
-                        property int loadedCount: 0
+                        TextMetrics { id: leftTabMetrics; text: tabDelegate.leftName; font.pixelSize: theme.fs(12); font.bold: true }
+                        TextMetrics { id: rightTabMetrics; text: tabDelegate.rightName; font.pixelSize: theme.fs(12); font.bold: true }
+                        width: isSplit
+                            ? Math.min(380, Math.max(220, leftTabMetrics.width + rightTabMetrics.width + 88))
+                            : Math.min(240, Math.max(120, leftTabMetrics.width + 84))
+                        height: 34
+                        radius: theme.radiusFull
+                        color: current ? theme.secondaryContainer : (tabMouse.containsMouse ? theme.hoverOverlay : theme.surfaceContainer)
+                        Behavior on width { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.35 } }
+                        Behavior on color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
 
-                        readonly property var rawItems: JSON.parse(engine.files_json || "[]")
-                        readonly property var searchItems: JSON.parse(engine.search_everywhere_json || "[]")
-
-                        function reloadItems() {
-                            var full = engine.is_searching_everywhere ? searchItems : rawItems;
-                            var query = searchInput.text.toLowerCase().trim();
-                            if (!engine.is_searching_everywhere && query.length > 0)
-                                full = full.filter(item => item.name.toLowerCase().indexOf(query) !== -1);
-                            if (window.chooserMode) full = full.filter(function(item) {
-                                return chooser.matches(item.path || engine.current_path + "/" + item.name, window.chooserFilter);
-                            });
-                            allTargetItems = full;
-                            displayedItems = full;
-                            loadedCount = full.length;
-                        }
-
-                        function refreshItems() {
-                            if (!window.pendingTabState && !window.switchingTab) window.pendingTabState = window.captureTabState();
-                            reloadItems();
-                            window.restoreTabState();
-                        }
-
-                        Timer {
-                            id: filterTimer
-                            interval: 80
-                            onTriggered: gridContainer.reloadItems()
-                        }
-
-                        Connections {
-                            target: engine
-                            function onFiles_jsonChanged() { gridContainer.refreshItems(); }
-                            function onSearch_everywhere_jsonChanged() { gridContainer.refreshItems(); }
-                            function onIs_loadingChanged() { window.restoreTabState(); }
-                            function onIs_searching_everywhereChanged() { gridContainer.clearSelection(); gridContainer.reloadItems(); }
-                        }
-
-                        Connections {
-                            target: searchInput
-                            function onTextChanged() { if (!window.switchingTab) { gridContainer.clearSelection(); filterTimer.restart(); } }
-                        }
-
-                        Component.onCompleted: gridContainer.reloadItems()
-
-                        function getFilteredItems() {
-                            return allTargetItems;
-                        }
-
-                        function getSelectedItems() {
-                            var raw = allTargetItems;
-                            var res = [];
-                            for (var k in selectedIndices) {
-                                var idx = parseInt(k);
-                                if (raw[idx]) res.push(raw[idx]);
-                            }
-                            return res;
-                        }
-
-                        function selectItem(idx, isCtrl, isShift) {
-                            if (window.chooserMode && !chooser.config.multiple) { isCtrl = false; isShift = false; }
-                            if (window.chooserMode && chooser.config.save && allTargetItems[idx] && !allTargetItems[idx].is_dir)
-                                chooserName.text = allTargetItems[idx].name;
-                            window.cancelTabRestore();
-                            var copy = {};
-                            if (isShift) {
-                                var anchor = anchorIndex !== -1 ? anchorIndex : (lastSelectedIndex !== -1 ? lastSelectedIndex : 0);
-                                var start = Math.min(anchor, idx);
-                                var end = Math.max(anchor, idx);
-                                for (var i = start; i <= end; ++i) {
-                                    copy[i] = true;
-                                }
-                                lastSelectedIndex = idx;
-                            } else if (isCtrl) {
-                                copy = Object.assign({}, selectedIndices);
-                                if (copy[idx]) {
-                                    delete copy[idx];
-                                } else {
-                                    copy[idx] = true;
-                                }
-                                lastSelectedIndex = idx;
-                                anchorIndex = idx;
-                            } else {
-                                copy[idx] = true;
-                                lastSelectedIndex = idx;
-                                anchorIndex = idx;
-                            }
-                            selectedIndices = copy;
-                        }
-
-                        function selectAll() {
-                            if (window.chooserMode && !chooser.config.multiple) return;
-                            window.cancelTabRestore();
-                            var raw = getFilteredItems();
-                            var copy = {};
-                            for (var i = 0; i < raw.length; ++i) {
-                                copy[i] = true;
-                            }
-                            selectedIndices = copy;
-                        }
-
-                        function clearSelection() {
-                            selectedIndices = {};
-                            lastSelectedIndex = -1;
-                            anchorIndex = -1;
-                        }
-
-                        function moveSelection(dx, dy, isShift) {
-                            var raw = getFilteredItems();
-                            if (raw.length === 0) return;
-
-                            var isList = engine.view_mode === "list";
-                            var effectiveCols = isList ? 1 : (filesGridView.cols || 1);
-
-                            var cur = lastSelectedIndex !== -1 ? lastSelectedIndex : 0;
-                            var target;
-                            if (isList) {
-                                var delta = (dy !== 0) ? dy : dx;
-                                target = cur + delta;
-                            } else {
-                                target = cur + dx + dy * effectiveCols;
-                            }
-
-                            if (target < 0) target = 0;
-                            if (target >= raw.length) target = raw.length - 1;
-
-                            selectItem(target, false, isShift);
-                            if (isList) {
-                                filesListView.positionViewAtIndex(target, ListView.Visible);
-                            } else {
-                                filesGridView.positionViewAtIndex(target, GridView.Visible);
-                            }
-                        }
-
-                        function openSelected() {
-                            var items = getSelectedItems();
-                            if (window.chooserMode && !items.length && chooser.config.directory) { window.acceptChooser(false); return; }
-                            if (items.length > 0) {
-                                var it = items[0];
-                                var targetPath = engine.is_searching_everywhere
-                                    ? it.path
-                                    : (engine.current_path + "/" + it.name);
-
-                                if (it.is_dir) {
-                                    clearSelection();
-                                    engine.set_path(targetPath);
-                                    if (engine.is_searching_everywhere) {
-                                        engine.clear_search_everywhere();
-                                        searchInput.text = "";
-                                    }
-                                } else {
-                                    window.activateFile(targetPath);
-                                }
-                            }
-                        }
-
-                        // Drop target: current directory (for external drops onto empty space)
-                        DropArea {
-                            id: gridDropArea
-                            anchors.fill: parent
-                            keys: ["text/uri-list"]
-
-                            // Only handle drops that didn't land on a folder card.
-                            // Folder cards have their own DropArea which takes priority.
-                            property bool gridIsTarget: containsDrag && dragManager.hoverTarget.length === 0
-
-                            onDropped: function(drop) {
-                                if (!drop.hasUrls) return;
-                                // If hovering a folder, that folder's DropArea owns the drop.
-                                if (dragManager.hoverTarget.length > 0) return;
-
-                                var destPath = engine.current_path;
-                                var paths = [];
-                                for (var i = 0; i < drop.urls.length; ++i) {
-                                    var u = drop.urls[i].toString();
-                                    if (u.startsWith("file://")) u = u.slice(7);
-                                    if (u === destPath) continue;
-                                    paths.push(u);
-                                }
-                                if (paths.length === 0) return;
-
-                                var asCopy;
-                                if (drop.source === dragProxy) {
-                                    asCopy = dragManager.asCopy;
-                                } else {
-                                    asCopy = (drop.proposedAction === Qt.CopyAction) || !(drop.supportedActions & Qt.MoveAction);
-                                }
-
-                                drop.accept(asCopy ? Qt.CopyAction : Qt.MoveAction);
-                                window.handleDrop(paths, destPath, asCopy);
-                            }
-                        }
-
-                        // Right-click on empty background or left-click deselect
                         MouseArea {
+                            id: tabMouse
                             anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            z: 0
-
-                            onPressed: {
-                                if (searchInput.activeFocus)
-                                    globalKeyHandler.forceActiveFocus();
-                            }
-
-                            onClicked: function(mouse) {
-                                if (selectionManager.justFinishedDrag) return;
-                                if (mouse.button === Qt.RightButton && !engine.is_searching_everywhere) {
-                                    contextMenu.showEmptyMenu(mouse.x + gridContainer.x, mouse.y + gridContainer.y);
-                                } else {
-                                    filesGridView.clearSelection();
-                                    contextMenu.close();
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                            onClicked: function(m) {
+                                if (m.button === Qt.MiddleButton) {
+                                    window.closeTab(tabDelegate.index);
+                                    return;
                                 }
+                                var right = tabDelegate.isSplit
+                                    && mapToItem(tabDelegate, m.x, m.y).x > tabRightLabel.mapToItem(tabDelegate, 0, 0).x;
+                                window.switchTab(tabDelegate.index);
+                                if (right && pane1Loader.item)
+                                    window.setActivePane(pane1Loader.item);
+                                else
+                                    window.setActivePane(pane0);
                             }
                         }
 
-                        GridView {
-                            id: filesGridView
-                            TapHandler {
-                                onTapped: {
-                                    if (filesGridView.indexAt(point.position.x + filesGridView.contentX, point.position.y + filesGridView.contentY) < 0) {
-                                        gridContainer.clearSelection();
-                                        globalKeyHandler.forceActiveFocus();
-                                        contextMenu.close();
-                                    }
-                                }
-                            }
+                        RowLayout {
                             anchors.fill: parent
-                            cellWidth: Math.max(1, width / cols)
-                            cellHeight: cellWidth
-                            reuseItems: true
-                            cacheBuffer: cellHeight * 2
-                            clip: true
-                            z: engine.view_mode === "grid" ? 2 : 1
-                            // Cross-fade grid <-> list instead of an instant swap.
-                            opacity: engine.view_mode === "grid" ? 1.0 : 0.0
-                            visible: opacity > 0.001
-                            enabled: engine.view_mode === "grid"
-                            Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(170); easing.type: Easing.OutCubic } }
-                            interactive: true
-                            onMovementStarted: window.cancelTabRestore()
-                            boundsBehavior: Flickable.StopAtBounds
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 6
+                            spacing: 6
 
-                            ScrollBar.vertical: ScrollBar {
-                                id: gridScrollBar
-                                policy: ScrollBar.AsNeeded
-                                width: 12
-                                padding: 2
-                                contentItem: Rectangle {
-                                    implicitWidth: 6
-                                    radius: 3
-                                    color: gridScrollBar.pressed ? theme.primary : (gridScrollBar.hovered ? theme.outline : theme.outlineVariant)
-                                    opacity: gridScrollBar.active ? 1.0 : 0.0
-                                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200)} }
-                                }
+                            SeabunnyIcon {
+                                name: tabDelegate.current
+                                    ? (window.activeView === "settings" ? "gear" : (window.activeView === "pc" ? "desktop" : (tabDelegate.isSplit ? "columns" : "folder")))
+                                    : (window.tabs[tabDelegate.index] && window.tabs[tabDelegate.index].view === "settings" ? "gear"
+                                        : (window.tabs[tabDelegate.index] && window.tabs[tabDelegate.index].view === "pc" ? "desktop"
+                                            : (tabDelegate.isSplit ? "columns" : "folder")))
+                                size: 14
+                                color: tabDelegate.current ? theme.secondaryContainerFg : theme.textMuted
                             }
-
-                            readonly property int rows: Math.ceil(count / cols)
-                            contentWidth: Math.max(width, cols * cellWidth)
-                            contentHeight: Math.max(height, rows * cellHeight)
-
-                            property alias selectedIndices: gridContainer.selectedIndices
-                            property alias selectedCount: gridContainer.selectedCount
-                            property alias lastSelectedIndex: gridContainer.lastSelectedIndex
-
-                            function selectItem(idx, isCtrl, isShift) { gridContainer.selectItem(idx, isCtrl, isShift); }
-                            function selectAll() { gridContainer.selectAll(); }
-                            function clearSelection() { gridContainer.clearSelection(); }
-                            function getFilteredItems() { return gridContainer.getFilteredItems(); }
-                            function getSelectedItems() { return gridContainer.getSelectedItems(); }
-                            function openSelected() { gridContainer.openSelected(); }
-
-                            readonly property int cols: Math.max(1, Math.floor(width / window.gridItemSize + 0.000001))
-
-                            // Per-card staggered enter is implemented on the delegate
-                            // itself (capped) instead of populate/add transitions, so
-                            // large folders and search results never hitch.
-
-                            // Wheel handler ensures smooth wheel scrolling in both select and scroll modes
-                            WheelHandler {
-                                id: gridWheelHandler
-                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                acceptedModifiers: Qt.KeyboardModifierMask
-                                target: null
-                                onWheel: function(event) {
-                                    var delta = event.angleDelta.y || event.pixelDelta.y;
-                                    if (delta === 0) { event.accepted = false; return; }
-                                    if (window.zoomGrid(event)) return;
-                                    window.cancelTabRestore();
-                                    var step = 80;
-                                    var newY = filesGridView.contentY - (delta > 0 ? step : -step);
-                                    var maxY = Math.max(0, filesGridView.contentHeight - filesGridView.height);
-                                    filesGridView.contentY = Math.max(0, Math.min(maxY, newY));
-                                }
-                            }
-
-                            MouseArea {
-                                objectName: "gridZoomInput"
-                                parent: filesGridView
-                                anchors.fill: parent
-                                z: 200
-                                acceptedButtons: Qt.NoButton
-                                onWheel: function(event) {
-                                    event.accepted = window.zoomGrid(event);
-                                }
-                            }
-
-                            // ==========================================
-                            // RUBBERBAND SELECTION BOX & CONTROLLER
-                            // ==========================================
-                            Rectangle {
-                                id: selectionBox
-                                parent: filesGridView.contentItem
-                                z: 100
-                                visible: false
-                                color: Qt.rgba(theme.primary.r, theme.primary.g, theme.primary.b, theme.isDark ? 0.22 : 0.16)
-                                border.color: theme.primary
-                                border.width: 1.5
-                                radius: theme.radiusM
-
-                                Behavior on color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                                Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.durationFast } }
-                            }
-
-                            ParallelAnimation {
-                                id: contractAnim
-                                NumberAnimation { target: selectionBox; property: "x"; to: selectionManager.startX; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                                NumberAnimation { target: selectionBox; property: "y"; to: selectionManager.startY; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                                NumberAnimation { target: selectionBox; property: "width"; to: 0; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                                NumberAnimation { target: selectionBox; property: "height"; to: 0; duration: theme.motionDuration(160); easing.type: Easing.OutCubic }
-                                NumberAnimation { target: selectionBox; property: "opacity"; to: 0.0; duration: theme.motionDuration(150); easing.type: Easing.OutQuad }
-
-                                onFinished: {
-                                    selectionBox.visible = false;
-                                    selectionBox.opacity = 1.0;
-                                }
-                            }
-
                             Item {
-                                id: selectionManager
-
-                                property real startX: 0
-                                property real startY: 0
-                                property real curX: 0
-                                property real curY: 0
-                                property bool active: false
-                                property bool justFinishedDrag: false
-                                property var baseSelection: ({})
-                                property bool isCtrl: false
-
-                                function start(x, y, ctrl) {
-                                    if (window.chooserMode && !chooser.config.multiple) return;
-                                    contractAnim.stop();
-                                    selectionBox.opacity = 1.0;
-                                    selectionBox.visible = false;
-                                    resetJustFinishedDragTimer.stop();
-                                    justFinishedDrag = false;
-
-                                    startX = x;
-                                    startY = y;
-                                    curX = x;
-                                    curY = y;
-                                    isCtrl = ctrl;
-                                    baseSelection = ctrl ? Object.assign({}, filesGridView.selectedIndices) : {};
-                                    active = false;
+                                Layout.fillWidth: true
+                                height: parent.height
+                                Text {
+                                    id: tabLeftLabel
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width
+                                    text: tabDelegate.leftName
+                                    color: tabDelegate.current ? theme.secondaryContainerFg : theme.textMain
+                                    font.pixelSize: theme.fs(12)
+                                    font.bold: tabDelegate.current && (!tabDelegate.isSplit || window.activePane === pane0)
+                                    elide: Text.ElideRight
                                 }
-
-                                function update(x, y) {
-                                    if (window.chooserMode && !chooser.config.multiple) return;
-                                    if (theme.dragAction !== "select") return;
-
-                                    curX = x;
-                                    curY = y;
-                                    var dx = curX - startX;
-                                    var dy = curY - startY;
-
-                                    if (!active && (dx * dx + dy * dy >= 25)) {
-                                        active = true;
-                                        contractAnim.stop();
-                                        selectionBox.opacity = 1.0;
-                                        selectionBox.visible = true;
-                                    }
-
-                                    if (active) {
-                                        var boxX = Math.min(startX, curX);
-                                        var boxY = Math.min(startY, curY);
-                                        var boxW = Math.abs(curX - startX);
-                                        var boxH = Math.abs(curY - startY);
-
-                                        selectionBox.x = boxX;
-                                        selectionBox.y = boxY;
-                                        selectionBox.width = boxW;
-                                        selectionBox.height = boxH;
-
-                                        var totalCount = filesGridView.count;
-                                        var cols = filesGridView.cols;
-                                        var cellW = filesGridView.cellWidth;
-                                        var cellH = filesGridView.cellHeight;
-
-                                        var newSelection = Object.assign({}, baseSelection);
-
-                                        for (var i = 0; i < totalCount; ++i) {
-                                            var col = i % cols;
-                                            var row = Math.floor(i / cols);
-                                            var itemL = col * cellW + 4;
-                                            var itemT = row * cellH + 4;
-                                            var itemR = itemL + cellW - 8;
-                                            var itemB = itemT + cellH - 8;
-
-                                            var intersects = (boxX < itemR && (boxX + boxW) > itemL &&
-                                                              boxY < itemB && (boxY + boxH) > itemT);
-
-                                            if (intersects) {
-                                                newSelection[i] = true;
-                                            } else if (!isCtrl) {
-                                                delete newSelection[i];
-                                            }
-                                        }
-
-                                        filesGridView.selectedIndices = newSelection;
-                                    }
-                                }
-
-                                function end() {
-                                    if (active) {
-                                        active = false;
-                                        justFinishedDrag = true;
-                                        contractAnim.start();
-                                        resetJustFinishedDragTimer.restart();
-                                    }
+                            }
+                            Rectangle {
+                                visible: tabDelegate.isSplit
+                                width: 1
+                                height: 16
+                                color: tabDelegate.current ? theme.secondaryContainerFg : theme.outlineVariant
+                                opacity: 0.35
+                            }
+                            Item {
+                                visible: tabDelegate.isSplit
+                                Layout.fillWidth: true
+                                height: parent.height
+                                Text {
+                                    id: tabRightLabel
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width
+                                    text: tabDelegate.rightName
+                                    color: tabDelegate.current ? theme.secondaryContainerFg : theme.textMain
+                                    font.pixelSize: theme.fs(12)
+                                    font.bold: tabDelegate.current && tabDelegate.isSplit && pane1Loader.item && window.activePane === pane1Loader.item
+                                    elide: Text.ElideRight
                                 }
                             }
 
-                            Timer {
-                                id: resetJustFinishedDragTimer
-                                interval: 60
-                                repeat: false
-                                onTriggered: selectionManager.justFinishedDrag = false
-                            }
-
-                            Timer {
-                                id: autoScrollTimer
-                                interval: 20
-                                repeat: true
-                                running: selectionManager.active
-
-                                onTriggered: {
-                                    var viewTop = filesGridView.contentY;
-                                    var viewBottom = viewTop + filesGridView.height;
-                                    var scrollMargin = 32;
-                                    var step = 10;
-
-                                    if (selectionManager.curY < viewTop + scrollMargin && filesGridView.contentY > 0) {
-                                        filesGridView.contentY = Math.max(0, filesGridView.contentY - step);
-                                        selectionManager.update(selectionManager.curX, selectionManager.curY);
-                                    } else if (selectionManager.curY > viewBottom - scrollMargin && filesGridView.contentY < filesGridView.contentHeight - filesGridView.height) {
-                                        filesGridView.contentY = Math.min(filesGridView.contentHeight - filesGridView.height, filesGridView.contentY + step);
-                                        selectionManager.update(selectionManager.curX, selectionManager.curY);
-                                    }
-                                }
-                            }
-
-                            // Background click & rubberband selection area
-                            MouseArea {
-                                id: bgMouseArea
-                                parent: filesGridView.contentItem
-                                x: 0
-                                y: 0
-                                width: Math.max(filesGridView.width, filesGridView.contentWidth)
-                                height: Math.max(filesGridView.height + filesGridView.contentY, filesGridView.contentHeight)
-                                z: 0
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                preventStealing: theme.dragAction === "select"
-
-                                property point pressPt: Qt.point(0, 0)
-
-                                onPressed: function(mouse) {
-                                    globalKeyHandler.forceActiveFocus();
-                                    if (mouse.button === Qt.LeftButton) {
-                                        pressPt = Qt.point(mouse.x, mouse.y);
-                                        if (theme.dragAction === "select") {
-                                            selectionManager.start(mouse.x, mouse.y, !!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)));
-                                        }
-                                    }
-                                }
-
-                                onPositionChanged: function(mouse) {
-                                    if (theme.dragAction !== "select") return;
-                                    if (mouse.buttons & Qt.LeftButton) {
-                                        selectionManager.update(mouse.x, mouse.y);
-                                    }
-                                }
-
-                                onReleased: function(mouse) {
-                                    if (selectionManager.active) {
-                                        selectionManager.end();
-                                    }
-                                }
-
-                                onCanceled: {
-                                    if (selectionManager.active) {
-                                        selectionManager.end();
-                                    }
-                                }
-
-                                onClicked: function(mouse) {
-                                    if (selectionManager.justFinishedDrag) return;
-                                    if (mouse.button === Qt.RightButton && !engine.is_searching_everywhere) {
-                                        var pt = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                        contextMenu.showEmptyMenu(pt.x, pt.y);
-                                    } else {
-                                        filesGridView.clearSelection();
-                                        contextMenu.close();
-                                    }
-                                }
-                            }
-
-                            function moveSelection(dx, dy, isShift) {
-                                gridContainer.moveSelection(dx, dy, isShift);
-                            }
-
-                            focus: true
-                            Keys.onLeftPressed: function(event) {
-                                moveSelection(-1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onRightPressed: function(event) {
-                                moveSelection(1, 0, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onUpPressed: function(event) {
-                                moveSelection(0, -1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onDownPressed: function(event) {
-                                moveSelection(0, 1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onReturnPressed: function(event) {
-                                openSelected();
-                                event.accepted = true;
-                            }
-                            Keys.onEnterPressed: function(event) {
-                                openSelected();
-                                event.accepted = true;
-                            }
-
-                            model: engine.view_mode === "grid" ? gridContainer.displayedItems : []
-
-                            delegate: Item {
-                                id: fileCardDelegate
-                                property bool entered: false
-                                property bool pooled: false
-                                Component.onCompleted: entered = true
-                                GridView.onPooled: pooled = true
-                                GridView.onReused: pooled = false
-                                width: filesGridView.cellWidth
-                                height: filesGridView.cellHeight
-
-                                readonly property var item: modelData
-                                readonly property bool isSelected: !!filesGridView.selectedIndices[index]
-
-                                readonly property bool isCutItem: {
-                                    if (!engine.has_clipboard) return false;
-                                    try {
-                                        var cutList = window.cutPaths;
-                                        var myPath = engine.is_searching_everywhere ? item.path : (engine.current_path + "/" + item.name);
-                                        return cutList.indexOf(myPath) !== -1;
-                                    } catch (e) {
-                                        return false;
-                                    }
-                                }
-
-                                opacity: isCutItem ? 0.52 : 1.0
-
-                                readonly property int col: index % filesGridView.cols
-                                readonly property bool hasLeft: isSelected && (col > 0) && !!filesGridView.selectedIndices[index - 1]
-                                readonly property bool hasRight: isSelected && (col < filesGridView.cols - 1) && !!filesGridView.selectedIndices[index + 1]
-
-                                readonly property string thumbSource: {
-                                    if (pooled || !filesGridView.visible || !theme.showThumbnails || fileCardDelegate.item.is_dir) return "";
-                                    return fileCardDelegate.item.thumbnail || "";
-                                }
-                                readonly property bool hasThumbnail: theme.showThumbnails && thumbSource.length > 0
-                                    && (thumbImg.status === Image.Ready)
-
-                                readonly property bool isDropTarget: fileCardDelegate.item.is_dir && folderDropArea.containsDrag
-
-                                // Drop target for folders: accept drops + hover-to-open
-                                DropArea {
-                                    id: folderDropArea
-                                    anchors.fill: parent
-                                    enabled: fileCardDelegate.item.is_dir
-                                    keys: ["text/uri-list"]
-
-                                    property string folderPath: engine.is_searching_everywhere
-                                        ? fileCardDelegate.item.path
-                                        : (engine.current_path + "/" + fileCardDelegate.item.name)
-
-                                    onEntered: function(drag) {
-                                        dragManager.hoverTarget = folderPath;
-                                    }
-                                    onExited: {
-                                        if (dragManager.hoverTarget === folderPath) {
-                                            dragManager.hoverTarget = "";
-                                        }
-                                    }
-                                    onPositionChanged: function(drag) {
-                                        dragManager.hoverTarget = folderPath;
-                                    }
-                                    onDropped: function(drop) {
-                                        dragManager.hoverTarget = "";
-                                        if (!drop.hasUrls) return;
-
-                                        var destPath = folderPath;
-                                        var paths = [];
-                                        for (var i = 0; i < drop.urls.length; ++i) {
-                                            var u = drop.urls[i].toString();
-                                            if (u.startsWith("file://")) u = u.slice(7);
-                                            // Ignore dropping a folder into itself
-                                            if (u === destPath) continue;
-                                            paths.push(u);
-                                        }
-                                        if (paths.length === 0) return;
-
-                                        // Internal drag: honor Ctrl (copy) vs default (move).
-                                        // External drag from another app: copy is the safe default.
-                                        var asCopy;
-                                        if (drop.source === dragProxy) {
-                                            asCopy = dragManager.asCopy;
-                                        } else {
-                                            asCopy = (drop.proposedAction === Qt.CopyAction) || !(drop.supportedActions & Qt.MoveAction);
-                                        }
-
-                                        drop.accept(asCopy ? Qt.CopyAction : Qt.MoveAction);
-                                        if (dragManager.isRmb) {
-                                            var pt = mapToItem(window.contentItem, cardMouseArea.mouseX, cardMouseArea.mouseY);
-                                            rmbDropMenu.showAt(pt.x, pt.y, paths, destPath);
-                                        } else {
-                                            window.handleDrop(paths, destPath, asCopy);
-                                        }
-                                    }
-                                }
-
-                                // Connected Selection Background with FULL Matching Outer Curvature
-                                Rectangle {
-                                    id: cardHighlight
-                                    anchors.fill: parent
-                                    anchors.topMargin: 4
-                                    anchors.bottomMargin: 4
-                                    anchors.leftMargin: fileCardDelegate.hasLeft ? -4 : 4
-                                    anchors.rightMargin: fileCardDelegate.hasRight ? -4 : 4
-
-                                    radius: theme.radiusL
-                                    color: fileCardDelegate.isDropTarget
-                                        ? Qt.rgba(theme.primary.r, theme.primary.g, theme.primary.b, theme.isDark ? 0.20 : 0.14)
-                                        : (fileCardDelegate.isSelected
-                                            ? theme.secondaryContainer
-                                            : (cardMouseArea.pressed ? theme.activeOverlay : theme.hoverOverlay))
-                                    opacity: (fileCardDelegate.isSelected || cardMouseArea.containsMouse || fileCardDelegate.isDropTarget) ? 1.0 : 0.0
-                                    border.color: fileCardDelegate.isDropTarget ? theme.primary : Qt.rgba(theme.primary.r, theme.primary.g, theme.primary.b, 0)
-                                    border.width: fileCardDelegate.isDropTarget ? 2 : 0
-
-                                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                    scale: fileCardDelegate.isDropTarget ? 1.06 : 1.0
-                                    Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 4.0; damping: 0.3 } }
-
-                                    // Square off right half if connected right (leaves left outer corners curved)
-                                    Rectangle {
-                                        visible: fileCardDelegate.hasRight
-                                        anchors.right: parent.right
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        width: parent.width / 2
-                                        color: parent.color
-                                        radius: 0
-                                    }
-
-                                    // Square off left half if connected left (leaves right outer corners curved)
-                                    Rectangle {
-                                        visible: fileCardDelegate.hasLeft
-                                        anchors.left: parent.left
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        width: parent.width / 2
-                                        color: parent.color
-                                        radius: 0
-                                    }
-                                }
-
-                                scale: !entered ? 0.82
-                                    : (cardMouseArea.pressed ? 0.94 : ((cardMouseArea.containsMouse && !fileCardDelegate.hasLeft && !fileCardDelegate.hasRight) ? 1.03 : 1.0))
-                                Behavior on scale { enabled: !theme.reducedMotion; SpringAnimation { spring: 3.5; damping: 0.3 } }
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 6
-                                    z: 1
-
-                                    Item {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
-                                        Layout.minimumHeight: 0
-                                        Layout.preferredHeight: Math.max(0, fileCardDelegate.height - 62)
-                                        objectName: "filePreview"
-
-                                        SeabunnyIcon {
-                                            visible: !fileCardDelegate.hasThumbnail && (theme.usesGlyphIcons)
-                                            objectName: "fileGlyphIcon"
-                                            anchors.centerIn: parent
-                                            name: fileCardDelegate.isCutItem
-                                                ? (fileCardDelegate.item.is_dir ? "folder-dashed" : "file-dashed")
-                                                : (fileCardDelegate.item.icon || (fileCardDelegate.item.is_dir ? "folder" : "file"))
-                                            size: Math.round(Math.min(parent.width, parent.height) * 0.9)
-                                            color: fileCardDelegate.isSelected
-                                                ? theme.secondaryContainerFg
-                                                : (fileCardDelegate.item.is_dir ? theme.primary : theme.textMain)
-                                        }
-
-                                        // Symlink badge indicator
-                                        Rectangle {
-                                            visible: !!fileCardDelegate.item.is_symlink
-                                            width: 14
-                                            height: 14
-                                            radius: 7
-                                            color: theme.surfaceContainer
-                                            border.color: theme.outlineVariant
-                                            border.width: 1
-                                            anchors.bottom: parent.bottom
-                                            anchors.right: parent.right
-                                            z: 2
-
-                                            SeabunnyIcon {
-                                                anchors.centerIn: parent
-                                                name: "arrow-square-out"
-                                                size: 9
-                                                color: theme.primary
-                                            }
-                                        }
-
-                                        Image {
-                                            visible: !fileCardDelegate.hasThumbnail && (!theme.usesGlyphIcons)
-                                            objectName: "fileSystemIcon"
-                                            anchors.centerIn: parent
-                                            source: theme.iconUrl(fileCardDelegate.item.icon_path)
-                                            width: Math.round(Math.min(parent.width, parent.height) * 0.9)
-                                            height: width
-                                            sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
-                                            sourceSize.height: Math.ceil(width * Screen.devicePixelRatio)
-                                            fillMode: Image.PreserveAspectFit
-                                            smooth: true
-                                            mipmap: true
-                                        }
-
-                                        Item {
-                                            id: thumbSlot
-                                            anchors.fill: parent
-                                            visible: fileCardDelegate.hasThumbnail
-
-                                            // Rounded mask. layer.enabled gives it a texture
-                                            // so it can be used as a MultiEffect maskSource
-                                            // while staying invisible.
-                                            Rectangle {
-                                                id: thumbMask
-                                                anchors.fill: parent
-                                                radius: theme.radiusM
-                                                color: "white"
-                                                visible: false
-                                                layer.enabled: true
-                                            }
-
-                                            // Thumbnail. MultiEffect cannot sample an invisible
-                                            // item, so the *visible* image is masked via
-                                            // layer.effect instead of feeding a hidden source
-                                            // into a separate MultiEffect.
-                                            Image {
-                                                id: thumbImg
-                                                objectName: "fileThumbnail"
-                                                anchors.fill: parent
-                                                source: fileCardDelegate.thumbSource
-                                                fillMode: Image.PreserveAspectFit
-                                                sourceSize.width: 512
-                                                sourceSize.height: 512
-                                                asynchronous: true
-                                                cache: true
-                                                retainWhileLoading: true
-                                                smooth: true
-                                                mipmap: true
-                                                visible: fileCardDelegate.hasThumbnail
-                                                layer.enabled: GraphicsInfo.api !== GraphicsInfo.Software
-                                                layer.effect: MultiEffect {
-                                                    maskEnabled: true
-                                                    maskSource: thumbMask
-                                                }
-                                            }
-
-                                        }
-                                    }
-
-                                    Text {
-                                        objectName: "fileNameLabel"
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        Layout.minimumHeight: 32
-                                        Layout.maximumHeight: 32
-                                        // If search everywhere, show disambiguated display_name (e.g. Projects/Pictures)
-                                        text: engine.is_searching_everywhere
-                                            ? (fileCardDelegate.item.display_name || fileCardDelegate.item.name)
-                                            : fileCardDelegate.item.name
-                                        color: fileCardDelegate.isSelected ? theme.secondaryContainerFg : theme.textMain
-                                        font.pixelSize: 11
-                                        font.bold: fileCardDelegate.item.is_dir || fileCardDelegate.isSelected
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignTop
-                                        wrapMode: Text.WrapAnywhere
-                                        maximumLineCount: 2
-                                        elide: Text.ElideMiddle
-                                    }
-
-                                }
-
-                                MouseArea {
-                                    id: cardMouseArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-                                    preventStealing: true
-
-                                    onWheel: function(wheel) {
-                                        wheel.accepted = window.zoomGrid(wheel);
-                                    }
-
-                                    property point pressPt: Qt.point(0, 0)
-                                    property bool dragStarted: false
-
-                                    onPressed: function(mouse) {
-                                        if (mouse.button === Qt.LeftButton) {
-                                            pressPt = Qt.point(mouse.x, mouse.y);
-                                            dragStarted = false;
-                                            if (!fileCardDelegate.isSelected && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) {
-                                                filesGridView.selectItem(index, false, false);
-                                            }
-                                        }
-                                    }
-
-                                    onPositionChanged: function(mouse) {
-                                        if (!(mouse.buttons & (Qt.LeftButton | Qt.RightButton))) return;
-                                        if (engine.is_searching_everywhere) return;
-                                        if (dragStarted) return;
-
-                                        var dx = mouse.x - pressPt.x;
-                                        var dy = mouse.y - pressPt.y;
-                                        if (dx * dx + dy * dy >= 36) {
-                                            dragStarted = true;
-                                            dragManager.isRmb = !!(mouse.buttons & Qt.RightButton);
-                                            var gpt = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                            dragManager.cursorPos = gpt;
-                                            dragManager.begin(fileCardDelegate.item, index, mouse);
-                                        }
-                                    }
-
-                                    onReleased: function(mouse) {
-                                        if (dragStarted) {
-                                            dragManager.end();
-                                            dragStarted = false;
-                                        }
-                                    }
-
-                                    onCanceled: {
-                                        if (dragStarted) {
-                                            dragManager.end();
-                                            dragStarted = false;
-                                        }
-                                    }
-
-                                    onClicked: function(mouse) {
-                                        if (mouse.button === Qt.MiddleButton) {
-                                            if (fileCardDelegate.item.is_dir) window.openFolderTab(fileCardDelegate.item.path || engine.current_path + "/" + fileCardDelegate.item.name, true);
-                                            return;
-                                        }
-                                        if (searchInput.activeFocus)
-                                            globalKeyHandler.forceActiveFocus();
-                                        if (mouse.button === Qt.RightButton) {
-                                            if (!fileCardDelegate.isSelected) {
-                                                filesGridView.selectItem(index, false, false);
-                                            }
-                                            var pt = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                            contextMenu.showItemMenu(fileCardDelegate.item, pt.x, pt.y);
-                                        } else {
-                                            contextMenu.close();
-                                            var isCtrl = !!(mouse.modifiers & Qt.ControlModifier);
-                                            var isShift = !!(mouse.modifiers & Qt.ShiftModifier);
-                                            filesGridView.selectItem(index, isCtrl, isShift);
-                                        }
-                                    }
-
-                                    onDoubleClicked: function(mouse) {
-                                        if (mouse.button === Qt.LeftButton) {
-                                            var targetPath = engine.is_searching_everywhere
-                                                ? fileCardDelegate.item.path
-                                                : (engine.current_path + "/" + fileCardDelegate.item.name);
-
-                                            if (fileCardDelegate.item.is_dir) {
-                                                gridContainer.clearSelection();
-                                                engine.set_path(targetPath);
-                                                if (engine.is_searching_everywhere) {
-                                                    engine.clear_search_everywhere();
-                                                    searchInput.text = "";
-                                                }
-                                            } else {
-                                                window.activateFile(targetPath);
-                                            }
-                                        }
-                                    }
-                                }
+                            TopIconButton {
+                                iconName: "x"
+                                small: true
+                                accessibleName: qsTr("Close tab")
+                                onClicked: window.closeTab(tabDelegate.index)
                             }
                         }
+                    }
 
-                        // List View Column Headers
+                    footer: Item {
+                        width: 40
+                        height: 34
+                        TopIconButton {
+                            anchors.centerIn: parent
+                            iconName: "plus"
+                            accessibleName: qsTr("New tab")
+                            onClicked: window.newTab(engine.location_kind === "dir" ? engine.current_path : "")
+                        }
+                    }
+                }
+
+                Item {
+                    id: mainStage
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Item {
+                        id: paneRow
+                        anchors.fill: parent
+                        visible: window.activeView === "files"
+                        readonly property real gap: 14
+                        // 0 = single pane, 1 = two equal panes
+                        property real split: window.splitView ? 1 : 0
+                        Behavior on split { enabled: theme.animate; SpringAnimation { spring: 3.6; damping: 0.4; epsilon: 0.002 } }
+                        readonly property real rightWidth: Math.max(0, Math.round((width - gap) / 2 * split))
+                        readonly property real leftWidth: width - (rightWidth > 0 ? rightWidth + gap * Math.min(1, split) : 0)
+
                         Rectangle {
-                            id: listHeaderRow
-                            readonly property bool shown: engine.view_mode === "list" && !engine.is_searching_everywhere
-                            visible: opacity > 0.001
-                            opacity: shown ? 1.0 : 0.0
-                            Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(170); easing.type: Easing.OutCubic } }
-                            anchors.top: parent.top
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            height: 32
-                            radius: theme.radiusM
-                            color: theme.surfaceContainer
-                            z: 2
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 16
-                                anchors.rightMargin: 16
-                                spacing: 12
-
-                                // Name Column
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 100
-                                    Layout.fillHeight: true
-
-                                    RowLayout {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "Name"
-                                            color: engine.sort_by === "name" ? theme.primary : theme.textMuted
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                        }
-                                        SeabunnyIcon {
-                                            visible: engine.sort_by === "name"
-                                            name: engine.sort_ascending ? "sort-ascending" : "sort-descending"
-                                            size: 13
-                                            color: theme.primary
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (engine.sort_by === "name") {
-                                                engine.toggle_sort_order();
-                                            } else {
-                                                engine.set_sort("name", true);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Date Modified Column
-                                Item {
-                                    visible: window.listShowDate
-                                    Layout.preferredWidth: 150
-                                    Layout.minimumWidth: 96
-                                    Layout.fillHeight: true
-
-                                    RowLayout {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "Date Modified"
-                                            color: engine.sort_by === "modified" ? theme.primary : theme.textMuted
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                        }
-                                        SeabunnyIcon {
-                                            visible: engine.sort_by === "modified"
-                                            name: engine.sort_ascending ? "sort-ascending" : "sort-descending"
-                                            size: 13
-                                            color: theme.primary
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (engine.sort_by === "modified") {
-                                                engine.toggle_sort_order();
-                                            } else {
-                                                engine.set_sort("modified", false);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Type Column
-                                Item {
-                                    visible: window.listShowType
-                                    Layout.preferredWidth: 100
-                                    Layout.minimumWidth: 70
-                                    Layout.fillHeight: true
-
-                                    RowLayout {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "Type"
-                                            color: engine.sort_by === "type" ? theme.primary : theme.textMuted
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                        }
-                                        SeabunnyIcon {
-                                            visible: engine.sort_by === "type"
-                                            name: engine.sort_ascending ? "sort-ascending" : "sort-descending"
-                                            size: 13
-                                            color: theme.primary
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (engine.sort_by === "type") {
-                                                engine.toggle_sort_order();
-                                            } else {
-                                                engine.set_sort("type", true);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Size Column
-                                Item {
-                                    visible: window.listShowSize
-                                    Layout.preferredWidth: 80
-                                    Layout.minimumWidth: 60
-                                    Layout.fillHeight: true
-
-                                    RowLayout {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "Size"
-                                            color: engine.sort_by === "size" ? theme.primary : theme.textMuted
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                        }
-                                        SeabunnyIcon {
-                                            visible: engine.sort_by === "size"
-                                            name: engine.sort_ascending ? "sort-ascending" : "sort-descending"
-                                            size: 13
-                                            color: theme.primary
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (engine.sort_by === "size") {
-                                                engine.toggle_sort_order();
-                                            } else {
-                                                engine.set_sort("size", false);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Detailed List View
-                        ListView {
-                            id: filesListView
-                            TapHandler {
-                                onTapped: {
-                                    if (filesListView.indexAt(point.position.x + filesListView.contentX, point.position.y + filesListView.contentY) < 0) {
-                                        gridContainer.clearSelection();
-                                        globalKeyHandler.forceActiveFocus();
-                                        contextMenu.close();
-                                    }
-                                }
-                            }
-                            reuseItems: true
-                            cacheBuffer: 160
-                            anchors.top: listHeaderRow.shown ? listHeaderRow.bottom : parent.top
-                            anchors.topMargin: listHeaderRow.shown ? 6 : 0
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            spacing: 3
+                            id: pane0Container
+                            x: 0
+                            width: paneRow.leftWidth
+                            height: parent.height
+                            radius: theme.radiusXl
+                            color: theme.surfaceContainerLow
                             clip: true
-                            z: engine.view_mode === "list" ? 2 : 1
-                            // Cross-fade grid <-> list instead of an instant swap.
-                            opacity: engine.view_mode === "list" ? 1.0 : 0.0
-                            visible: opacity > 0.001
-                            enabled: engine.view_mode === "list"
-                            Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(170); easing.type: Easing.OutCubic } }
-                            interactive: true
-                            boundsBehavior: Flickable.StopAtBounds
+                            border.width: (window.splitView && window.activePane === pane0) ? 2 : (window.splitView ? 1 : (window.keyboardNavActive ? 2 : 0))
+                            border.color: (window.splitView && window.activePane === pane0) ? theme.primary : (window.splitView ? theme.outlineVariant : theme.primary)
+                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
 
-                            MouseArea {
-                                parent: filesListView.contentItem
-                                width: Math.max(filesListView.width, filesListView.contentWidth)
-                                height: Math.max(filesListView.height + filesListView.contentY, filesListView.contentHeight)
-                                z: 0
-                                onPressed: globalKeyHandler.forceActiveFocus()
-                                onClicked: {
-                                    gridContainer.clearSelection();
-                                    contextMenu.close();
-                                }
+                            FilePane {
+                                id: pane0
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                isActive: window.activePane === pane0
+                                onActivated: window.setActivePane(pane0)
+                                opacity: window.splitView && !isActive ? 0.90 : 1.0
                             }
+                        }
 
-                            ScrollBar.vertical: ScrollBar {
-                                id: listScrollBar
-                                policy: ScrollBar.AsNeeded
-                                width: 12
-                                padding: 2
-                                contentItem: Rectangle {
-                                    implicitWidth: 6
-                                    radius: 3
-                                    color: listScrollBar.pressed ? theme.primary : (listScrollBar.hovered ? theme.outline : theme.outlineVariant)
-                                    opacity: listScrollBar.active ? 1.0 : 0.0
-                                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200)} }
-                                }
-                            }
+                        Rectangle {
+                            id: pane1Container
+                            x: paneRow.width - width
+                            width: paneRow.rightWidth
+                            height: parent.height
+                            visible: width > 2
+                            opacity: Math.min(1, paneRow.split * 1.6)
+                            radius: theme.radiusXl
+                            color: theme.surfaceContainerLow
+                            clip: true
+                            border.width: (window.splitView && pane1Loader.item && window.activePane === pane1Loader.item) ? 2 : 1
+                            border.color: (window.splitView && pane1Loader.item && window.activePane === pane1Loader.item) ? theme.primary : theme.outlineVariant
+                            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: theme.durationFast } }
+                            Behavior on border.width { enabled: theme.animate; NumberAnimation { duration: theme.durationFast } }
 
-                            WheelHandler {
-                                id: listWheelHandler
-                                target: null
-                                onWheel: function(event) {
-                                    window.cancelTabRestore();
-                                    var delta = event.angleDelta.y;
-                                    var step = 80;
-                                    var newY = filesListView.contentY - (delta > 0 ? step : -step);
-                                    var maxY = Math.max(0, filesListView.contentHeight - filesListView.height);
-                                    filesListView.contentY = Math.max(0, Math.min(maxY, newY));
-                                }
-                            }
-
-                            // Keyboard navigation (arrow keys + open), mirroring the grid.
-                            focus: false
-                            Keys.onUpPressed: function(event) {
-                                gridContainer.moveSelection(0, -1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onDownPressed: function(event) {
-                                gridContainer.moveSelection(0, 1, !!(event.modifiers & Qt.ShiftModifier));
-                                event.accepted = true;
-                            }
-                            Keys.onReturnPressed: function(event) {
-                                gridContainer.openSelected();
-                                event.accepted = true;
-                            }
-                            Keys.onEnterPressed: function(event) {
-                                gridContainer.openSelected();
-                                event.accepted = true;
-                            }
-
-                            model: engine.view_mode === "list" ? gridContainer.displayedItems : []
-
-                            delegate: Item {
-                                id: listRowDelegate
-                                property bool pooled: false
-                                ListView.onPooled: pooled = true
-                                ListView.onReused: pooled = false
-                                width: filesListView.width
-                                height: 38
-
-                                readonly property var item: modelData
-                                readonly property bool isSelected: !engine.is_searching_everywhere && !!gridContainer.selectedIndices[index]
-                                readonly property bool isHovered: listRowMouse.containsMouse
-                                readonly property bool isDropTarget: listFolderDropArea.containsDrag
-
-                                readonly property bool isCutItem: {
-                                    if (!engine.has_clipboard) return false;
-                                    try {
-                                        var cutList = window.cutPaths;
-                                        var myPath = engine.is_searching_everywhere ? item.path : (engine.current_path + "/" + item.name);
-                                        return cutList.indexOf(myPath) !== -1;
-                                    } catch (e) {
-                                        return false;
-                                    }
-                                }
-
-                                readonly property string fullPath: engine.is_searching_everywhere
-                                    ? item.path : (engine.current_path + "/" + item.name)
-                                readonly property string thumbSource: {
-                                    if (pooled || !filesListView.visible || !theme.showThumbnails || item.is_dir) return "";
-                                    return item.thumbnail || "";
-                                }
-                                readonly property bool hasThumbnail: theme.showThumbnails && thumbSource.length > 0
-                                    && (listThumbImg.status === Image.Ready)
-
-                                opacity: isCutItem ? 0.52 : 1.0
-                                Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: theme.radiusM
-                                    color: listRowDelegate.isSelected
-                                        ? theme.secondaryContainer
-                                        : (listRowDelegate.isDropTarget ? theme.primaryContainer : theme.hoverOverlay)
-                                    opacity: (listRowDelegate.isSelected || listRowDelegate.isHovered || listRowDelegate.isDropTarget) ? 1.0 : 0.0
-                                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.durationFast } }
-                                }
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 12
-                                    anchors.rightMargin: 12
-                                    spacing: 12
-
-                                    // Name Column
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 10
-
-                                        Item {
-                                            width: 22
-                                            height: 22
-                                            Layout.alignment: Qt.AlignVCenter
-
-                                            SeabunnyIcon {
-                                                visible: !listRowDelegate.hasThumbnail && theme.usesGlyphIcons
-                                                anchors.centerIn: parent
-                                                name: listRowDelegate.isCutItem
-                                                    ? (listRowDelegate.item.is_dir ? "folder-dashed" : "file-dashed")
-                                                    : (listRowDelegate.item.icon || (listRowDelegate.item.is_dir ? "folder" : "file"))
-                                                size: 18
-                                                color: listRowDelegate.isSelected ? theme.secondaryContainerFg : (listRowDelegate.item.is_dir ? theme.primary : theme.textMain)
-                                            }
-
-                                            // Small symlink badge indicator
-                                            Rectangle {
-                                                visible: !!listRowDelegate.item.is_symlink
-                                                width: 10
-                                                height: 10
-                                                radius: 5
-                                                color: theme.surfaceContainer
-                                                border.color: theme.outlineVariant
-                                                border.width: 1
-                                                anchors.bottom: parent.bottom
-                                                anchors.right: parent.right
-
-                                                SeabunnyIcon {
-                                                    anchors.centerIn: parent
-                                                    name: "arrow-square-out"
-                                                    size: 7
-                                                    color: theme.primary
-                                                }
-                                            }
-
-                                            Image {
-                                                visible: !listRowDelegate.hasThumbnail && !theme.usesGlyphIcons
-                                                anchors.centerIn: parent
-                                                source: theme.iconUrl(listRowDelegate.item.icon_path)
-                                                width: 18
-                                                height: 18
-                                                sourceSize.width: 36
-                                                sourceSize.height: 36
-                                                fillMode: Image.PreserveAspectFit
-                                            }
-
-                                            // Inline image thumbnail (replaces the icon).
-                                            Rectangle {
-                                                anchors.fill: parent
-                                                visible: listRowDelegate.hasThumbnail
-                                                radius: 6
-                                                color: theme.surfaceContainerHigh
-                                                clip: true
-
-                                                Image {
-                                                    id: listThumbImg
-                                                    anchors.fill: parent
-                                                    source: listRowDelegate.thumbSource
-                                                    fillMode: Image.PreserveAspectCrop
-                                                    sourceSize.width: 512
-                                                    sourceSize.height: 512
-                                                    asynchronous: true
-                                                    cache: true
-                                                    retainWhileLoading: true
-                                                    smooth: true
-                                                    mipmap: true
-                                                }
-
-                                                Rectangle {
-                                                    anchors.fill: parent
-                                                    radius: 6
-                                                    color: "transparent"
-                                                    border.color: theme.outlineVariant
-                                                    border.width: 1
-                                                    opacity: 0.4
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: listRowDelegate.item.name
-                                            color: listRowDelegate.isSelected ? theme.secondaryContainerFg : theme.textMain
-                                            font.pixelSize: 13
-                                            font.bold: listRowDelegate.item.is_dir || listRowDelegate.isSelected
-                                            elide: Text.ElideMiddle
-                                        }
-                                    }
-
-                                    // Date Column
-                                    Text {
-                                        visible: window.listShowDate
-                                        Layout.preferredWidth: 150
-                                        Layout.minimumWidth: 96
-                                        text: listRowDelegate.item.modified_str || "-"
-                                        color: listRowDelegate.isSelected ? theme.secondaryContainerFg : theme.textMuted
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                    }
-
-                                    // Type Column
-                                    Text {
-                                        visible: window.listShowType
-                                        Layout.preferredWidth: 100
-                                        Layout.minimumWidth: 70
-                                        text: listRowDelegate.item.category || "-"
-                                        color: listRowDelegate.isSelected ? theme.secondaryContainerFg : theme.outline
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                    }
-
-                                    // Size Column
-                                    Text {
-                                        visible: window.listShowSize
-                                        Layout.preferredWidth: 80
-                                        Layout.minimumWidth: 60
-                                        text: listRowDelegate.item.size_str || "-"
-                                        color: listRowDelegate.isSelected ? theme.secondaryContainerFg : theme.textMuted
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                    }
-                                }
-
-                                DropArea {
-                                    id: listFolderDropArea
-                                    anchors.fill: parent
-                                    enabled: listRowDelegate.item.is_dir
-                                    keys: ["text/uri-list"]
-
-                                    onEntered: function(drag) {
-                                        dragManager.hoverTarget = engine.current_path + "/" + listRowDelegate.item.name;
-                                    }
-                                    onExited: {
-                                        if (dragManager.hoverTarget === (engine.current_path + "/" + listRowDelegate.item.name)) {
-                                            dragManager.hoverTarget = "";
-                                        }
-                                    }
-                                    onDropped: function(drop) {
-                                        if (!drop.hasUrls) return;
-                                        var folderPath = engine.current_path + "/" + listRowDelegate.item.name;
-                                        dragManager.hoverTarget = "";
-                                        var paths = [];
-                                        for (var i = 0; i < drop.urls.length; ++i) {
-                                            var u = drop.urls[i].toString();
-                                            if (u.startsWith("file://")) u = u.slice(7);
-                                            if (u === folderPath) continue;
-                                            paths.push(u);
-                                        }
-                                        if (paths.length === 0) return;
-
-                                        var asCopy;
-                                        if (drop.source === dragProxy) {
-                                            asCopy = dragManager.asCopy;
-                                        } else {
-                                            asCopy = (drop.proposedAction === Qt.CopyAction) || !(drop.supportedActions & Qt.MoveAction);
-                                        }
-                                        drop.accept(asCopy ? Qt.CopyAction : Qt.MoveAction);
-                                        if (dragManager.isRmb) {
-                                            var pt = mapToItem(window.contentItem, listRowMouse.mouseX, listRowMouse.mouseY);
-                                            rmbDropMenu.showAt(pt.x, pt.y, paths, folderPath);
-                                        } else {
-                                            window.handleDrop(paths, folderPath, asCopy);
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: listRowMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-                                    cursorShape: Qt.PointingHandCursor
-                                    preventStealing: true
-
-                                    onWheel: function(wheel) {
-                                        wheel.accepted = false;
-                                    }
-
-                                    property point pressPos: Qt.point(0, 0)
-                                    property bool isDragging: false
-
-                                    onPressed: function(mouse) {
-                                        pressPos = Qt.point(mouse.x, mouse.y);
-                                        isDragging = false;
-                                        var isCtrl = !!(mouse.modifiers & Qt.ControlModifier);
-                                        var isShift = !!(mouse.modifiers & Qt.ShiftModifier);
-                                        if (mouse.button === Qt.LeftButton) {
-                                            if (!gridContainer.selectedIndices[index] && !isCtrl && !isShift) {
-                                                gridContainer.selectItem(index, false, false);
-                                            }
-                                        }
-                                    }
-
-                                    onPositionChanged: function(mouse) {
-                                        if (mouse.buttons & (Qt.LeftButton | Qt.RightButton)) {
-                                            var dx = mouse.x - pressPos.x;
-                                            var dy = mouse.y - pressPos.y;
-                                            if (!isDragging && (dx*dx + dy*dy >= 36)) {
-                                                isDragging = true;
-                                                dragManager.isRmb = !!(mouse.buttons & Qt.RightButton);
-                                                var gpt = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                                dragManager.cursorPos = gpt;
-                                                dragManager.begin(listRowDelegate.item, index, mouse);
-                                            }
-                                        }
-                                    }
-
-                                    onReleased: function(mouse) {
-                                        if (isDragging) {
-                                            isDragging = false;
-                                            dragManager.end();
-                                        }
-                                    }
-
-                                    onClicked: function(mouse) {
-                                        if (mouse.button === Qt.MiddleButton) {
-                                            if (listRowDelegate.item.is_dir) window.openFolderTab(listRowDelegate.item.path || engine.current_path + "/" + listRowDelegate.item.name, true);
-                                            return;
-                                        }
-                                        if (isDragging) return;
-                                        if (searchInput.activeFocus)
-                                            globalKeyHandler.forceActiveFocus();
-                                        var isCtrl = !!(mouse.modifiers & Qt.ControlModifier);
-                                        var isShift = !!(mouse.modifiers & Qt.ShiftModifier);
-                                        if (mouse.button === Qt.LeftButton) {
-                                            gridContainer.selectItem(index, isCtrl, isShift);
-                                        } else if (mouse.button === Qt.RightButton) {
-                                            if (!gridContainer.selectedIndices[index]) {
-                                                gridContainer.selectItem(index, false, false);
-                                            }
-                                            var pt = mapToItem(window.contentItem, mouse.x, mouse.y);
-                                            contextMenu.showItemMenu(listRowDelegate.item, pt.x, pt.y);
-                                        }
-                                    }
-
-                                    onDoubleClicked: function(mouse) {
-                                        if (mouse.button === Qt.LeftButton) {
-                                            var fullPath = engine.is_searching_everywhere
-                                                ? listRowDelegate.item.path
-                                                : (engine.current_path + "/" + listRowDelegate.item.name);
-                                            if (listRowDelegate.item.is_dir) {
-                                                gridContainer.clearSelection();
-                                                engine.set_path(fullPath);
-                                                if (engine.is_searching_everywhere) {
-                                                    engine.clear_search_everywhere();
-                                                    searchInput.text = "";
-                                                }
-                                            } else {
-                                                window.activateFile(fullPath);
-                                            }
-                                        }
-                                    }
+                            Loader {
+                                id: pane1Loader
+                                // Keep the pane at its full width while the container animates, so
+                                // the contents slide in rather than reflow.
+                                x: 14
+                                y: 14
+                                width: Math.max(0, Math.round((paneRow.width - paneRow.gap) / 2) - 28)
+                                height: parent.height - 28
+                                active: window.splitView || pane1Container.visible
+                                onLoaded: window.seedSplit()
+                                sourceComponent: FilePane {
+                                    id: pane1
+                                    isActive: window.activePane === pane1
+                                    onActivated: window.setActivePane(pane1)
+                                    opacity: !isActive ? 0.90 : 1.0
                                 }
                             }
                         }
                     }
-                }
 
-                // VIEW 2: INTEGRATED SETTINGS VIEW
-                SettingsView {
-                    id: settingsView
-                    anchors.fill: parent
-                    anchors.margins: 22
-                    searchQuery: window.activeView === "settings" ? searchInput.text : ""
-                    visible: opacity > 0.001
-                    opacity: window.activeView === "settings" ? 1.0 : 0.0
-                    enabled: window.activeView === "settings"
+                    Rectangle {
+                        id: settingsContainer
+                        anchors.fill: parent
+                        radius: theme.radiusXl
+                        color: theme.surfaceContainerLow
+                        clip: true
+                        visible: opacity > 0.01
+                        opacity: window.activeView === "settings" ? 1.0 : 0.0
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                    transform: Translate {
-                        y: window.activeView === "settings" ? 0 : 8
-                        Behavior on y { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
+                        SettingsView {
+                            id: settingsView
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            searchQuery: window.activeView === "settings" ? searchInput.text : ""
+                        }
+                    }
+
+                    Rectangle {
+                        id: pcContainer
+                        anchors.fill: parent
+                        radius: theme.radiusXl
+                        color: theme.surfaceContainerLow
+                        clip: true
+                        visible: opacity > 0.01
+                        opacity: window.activeView === "pc" ? 1.0 : 0.0
+                        Behavior on opacity { enabled: theme.animate; NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+                        PCView {
+                            id: pcView
+                            anchors.fill: parent
+                            anchors.margins: 22
+                        }
                     }
                 }
-
-                // VIEW 3: PC DASHBOARD
-                PCView {
-                    id: pcView
-                    anchors.fill: parent
-                    anchors.margins: 22
-                    visible: opacity > 0.001
-                    opacity: window.activeView === "pc" ? 1.0 : 0.0
-                    enabled: window.activeView === "pc"
-
-                    Behavior on opacity { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                    transform: Translate {
-                        y: window.activeView === "pc" ? 0 : 8
-                        Behavior on y { enabled: !theme.reducedMotion; NumberAnimation { duration: theme.motionDuration(200); easing.type: Easing.OutCubic } }
-                    }
-                }
-
-                // VIEW 4: TRASH is now a normal directory (navigated via the nav
-                // rail -> engine.trash_root); no dedicated view exists anymore.
-                } // end mainStageContent
             }
         }
     }
 
-    Rectangle {
-        id: sidebarDragProxy
-        parent: window.contentItem
-        width: 120
-        height: 36
-        radius: 12
-        color: theme.primaryContainer
-        z: 10000
-        visible: Drag.active
-        property string sidebarId: ""
-        property string label: ""
-        Drag.dragType: Drag.Internal
-        Drag.source: sidebarDragProxy
-        Drag.keys: ["seabunny/sidebar"]
-        Drag.supportedActions: Qt.MoveAction
-        Drag.hotSpot.x: 16
-        Drag.hotSpot.y: 16
-        Text {
-            anchors.fill: parent
-            anchors.margins: 8
-            text: sidebarDragProxy.label
-            elide: Text.ElideRight
-            color: theme.primaryContainerFg
-        }
+    OperationsPanel {
+        id: opsPanel
+        z: 50
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 34
+        anchors.bottomMargin: 34
     }
 
-    // ==========================================
-    // FILE DRAG & DROP SYSTEM
-    // ==========================================
+    Toast {
+        id: toastItem
+        z: 60
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 34
+    }
+    component TopIconButton: Item {
+        id: tib
+        property string iconName: ""
+        property string systemIcon: ""
+        property string accessibleName: ""
+        property bool small: false
+        signal clicked()
+        implicitWidth: small ? 24 : 36
+        implicitHeight: small ? 24 : 36
+        opacity: enabled ? 1.0 : 0.4
+        Accessible.role: Accessible.Button
+        Accessible.name: accessibleName
+        Accessible.onPressAction: tib.clicked()
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: tibMouse.containsMouse ? theme.hoverOverlay : "transparent"
+        }
+        SeabunnyIcon {
+            visible: theme.iconSource === "phosphor" || tib.systemIcon.length === 0
+            anchors.centerIn: parent
+            name: tib.iconName
+            size: tib.small ? 12 : 18
+            color: theme.textMain
+        }
+        Image {
+            visible: !theme.usesGlyphIcons && tib.systemIcon.length > 0
+            anchors.centerIn: parent
+            source: visible ? window.systemIcon(tib.systemIcon) : ""
+            width: 18
+            height: 18
+            sourceSize.width: 36
+            sourceSize.height: 36
+        }
+        MouseArea {
+            id: tibMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: tib.clicked()
+        }
+        ToolTip.visible: tibMouse.containsMouse && tib.accessibleName.length > 0
+        ToolTip.text: tib.accessibleName
+        ToolTip.delay: 600
+    }
     QtObject {
         id: dragManager
         property bool active: false
         property bool asCopy: false
         property bool isRmb: false
-        property var paths: []          // absolute paths being dragged
-        property string hoverTarget: "" // dir path currently hovered (for auto-open)
+        property var paths: []
+        property string hoverTarget: ""
+        // Engine of the pane the hovered folder is in (split view).
+        property var hoverEngine: null
         property point cursorPos: Qt.point(0, 0)
 
-        function begin(item, index, mouse) {
-            if (window.chooserMode) return;
-            if (engine.archive_path.length) return;
-            // Drag the whole selection if the pressed card is part of it,
-            // otherwise just the pressed card.
-            var idxs = [];
-            if (filesGridView.selectedIndices[index]) {
-                for (var k in filesGridView.selectedIndices) idxs.push(parseInt(k));
-            } else {
-                filesGridView.selectItem(index, false, false);
-                idxs = [index];
-            }
+        // Never spring-open a folder that is itself being dragged.
+        function hover(path, eng) {
+            if (paths.indexOf(path) >= 0)
+                return;
+            hoverTarget = path;
+            hoverEngine = eng;
+        }
 
-            var items = gridContainer.allTargetItems;
-            var list = [];
-            for (var i = 0; i < idxs.length; ++i) {
-                var it = items[idxs[i]];
-                if (!it) continue;
-                list.push(engine.is_searching_everywhere ? it.path
-                    : (engine.current_path + "/" + it.name));
-            }
-            if (list.length === 0) return;
-
+        function begin(list, mouse) {
+            if (!list || list.length === 0)
+                return;
             paths = list;
             isRmb = (mouse.button === Qt.RightButton || !!(mouse.buttons & Qt.RightButton));
             asCopy = !!(mouse.modifiers & Qt.ControlModifier);
@@ -4380,68 +1967,50 @@ ApplicationWindow {
             hoverTarget = "";
             dragProxy.x = cursorPos.x;
             dragProxy.y = cursorPos.y;
-
-            // Grab the ghost for the drag pixmap, then start once it's ready.
             dragGhost.visible = true;
             dragGhost.grabToImage(function(result) {
                 dragProxy.ghostImageSource = result.url;
                 dragGhost.visible = false;
-                if (dragManager.active) {
+                if (dragManager.active)
                     dragProxy.Drag.active = true;
-                }
             });
         }
 
         function end() {
             active = false;
             hoverTarget = "";
-            hoverOpenTimer.stop();
             dragProxy.Drag.active = false;
         }
     }
 
-    // Invisible proxy that carries the platform drag (external apps read its mimeData)
+    // Percent-encodes each path segment so names with spaces, '#' or '%'
+    // survive as URIs in other applications.
+    function fileUri(path) {
+        return "file://" + path.split("/").map(encodeURIComponent).join("/");
+    }
+
     Item {
         id: dragProxy
         visible: false
         width: 1
         height: 1
-
         Drag.active: false
         Drag.dragType: Drag.Automatic
         Drag.keys: ["text/uri-list"]
         Drag.source: dragProxy
-        Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
+        Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
         Drag.proposedAction: dragManager.asCopy ? Qt.CopyAction : Qt.MoveAction
         Drag.hotSpot.x: dragGhost.width / 2
         Drag.hotSpot.y: dragGhost.height / 2
         Drag.imageSource: ghostImageSource
-
-        // Build a file:// uri list from the dragged paths.
-        // Qt splits text/uri-list on CRLF per RFC 2483, so join with \r\n.
-        property string uriList: {
-            var uris = [];
-            for (var i = 0; i < dragManager.paths.length; ++i) {
-                uris.push("file://" + dragManager.paths[i]);
-            }
-            return uris.join("\r\n");
-        }
         property url ghostImageSource: ""
-
         Drag.mimeData: ({
-            "text/uri-list": uriList,
+            "text/uri-list": dragManager.paths.map(window.fileUri).join("\r\n"),
             "text/plain": dragManager.paths.join("\n")
         })
-
-        // dragFinished is a signal of the Drag attached type, not the Item
-        Drag.onDragFinished: function(dropAction) {
-            // Internal drops handle their own fs work via DropArea.onDropped.
-            // Only clean up state here; the DropArea path already refreshed.
-            dragManager.end();
-        }
+        Drag.onDragFinished: dragManager.end()
     }
 
-    // Visible ghost shown while dragging inside the app (also source of the drag image)
     Rectangle {
         id: dragGhost
         visible: false
@@ -4452,396 +2021,709 @@ ApplicationWindow {
         color: theme.surfaceContainerHighest
         border.color: theme.primary
         border.width: 1.5
-        opacity: 0.96
-
         Row {
             id: ghostRow
             anchors.centerIn: parent
             spacing: 10
-
-            SeabunnyIcon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: "file"
-                size: 22
-                color: theme.primary
-            }
-
+            SeabunnyIcon { anchors.verticalCenter: parent.verticalCenter; name: dragManager.paths.length > 1 ? "files" : "file"; size: 22; color: theme.primary }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: dragManager.paths.length > 1
-                    ? (dragManager.paths.length + " files")
-                    : (dragManager.paths.length === 1
-                        ? dragManager.paths[0].split("/").pop()
-                        : "")
+                text: dragManager.paths.length > 1 ? qsTr("%1 files").arg(dragManager.paths.length)
+                    : (dragManager.paths.length === 1 ? dragManager.paths[0].split("/").pop() : "")
                 color: theme.textMain
-                font.pixelSize: 12
+                font.pixelSize: theme.fs(12)
                 font.bold: true
                 elide: Text.ElideRight
-                maximumLineCount: 1
                 width: Math.min(implicitWidth, 180)
             }
         }
-
-        // "copy" badge when Ctrl is held
-        Rectangle {
-            visible: dragManager.asCopy
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: -4
-            width: 20
-            height: 20
-            radius: 10
-            color: theme.primary
-
-            SeabunnyIcon {
-                anchors.centerIn: parent
-                name: "copy"
-                size: 12
-                color: theme.primaryFg
-            }
-        }
     }
 
-    // Hover-to-open timer: if a drag stays over a folder, navigate into it
+    // Hovering a folder during a drag opens it.
     Timer {
-        id: hoverOpenTimer
         interval: 750
-        repeat: false
         running: dragManager.active && dragManager.hoverTarget.length > 0
         onTriggered: {
             if (dragManager.active && dragManager.hoverTarget.length > 0) {
-                var target = dragManager.hoverTarget;
+                var t = dragManager.hoverTarget;
+                var eng = dragManager.hoverEngine || window.activePane.engine;
                 dragManager.hoverTarget = "";
-                filesGridView.clearSelection();
-                engine.set_path(target);
+                eng.set_path(t);
             }
         }
     }
+    function confirmEmptyTrash() {
+        confirmDialog.ask(qsTr("Empty the trash?"), qsTr("All items in the trash will be permanently deleted."),
+            qsTr("Empty Trash"), function() { core.empty_trash(); });
+    }
 
-    // ==========================================
-    // CONTEXT MENUS -- built on the shared SeabunnyMenu library
-    // ==========================================
+    function menuFromTree(tree, onPick) {
+        var out = [];
+        for (var i = 0; i < tree.length; ++i) {
+            (function(node) {
+                if (node.children && node.children.length > 0)
+                    out.push({ text: node.name, icon: "folder", submenu: window.menuFromTree(node.children, onPick) });
+                else
+                    out.push({ text: node.name, icon: "file", action: function() { onPick(node.path); } });
+            })(tree[i]);
+        }
+        return out;
+    }
+
+    function openWithData(paths) {
+        try {
+            return JSON.parse(core.open_with_data(paths[0]) || "{}");
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function appRow(app, paths, defaultId, icon) {
+        return {
+            text: app.name,
+            icon: icon || "",
+            iconUrl: icon ? "" : (app.icon || ""),
+            checkable: app.id === defaultId,
+            checked: app.id === defaultId,
+            action: function() { core.open_with_app(JSON.stringify(paths), app.id); }
+        };
+    }
+
+    function openWithMenu(paths, data) {
+        var recommended = data.recommended || [];
+        var recent = data.recent || [];
+        var defaultId = data.defaultId || "";
+        var used = {};
+        var sub = [{ text: qsTr("Choose Application…"), icon: "app-window", action: function() { openWithModal.showFor(paths); } }];
+        for (var r = 0; r < recent.length; ++r) {
+            used[recent[r].id] = true;
+            sub.push(appRow(recent[r], paths, defaultId, "clock-counter-clockwise"));
+        }
+        var suggested = [];
+        for (var i = 0; i < recommended.length; ++i) {
+            if (used[recommended[i].id])
+                continue;
+            used[recommended[i].id] = true;
+            suggested.push(recommended[i]);
+        }
+        if (suggested.length > 0) {
+            if (sub.length > 0)
+                sub.push({ text: qsTr("Suggested for this file"), icon: "sparkle", separatorBefore: true, enabled: false });
+            for (var s = 0; s < suggested.length; ++s)
+                sub.push(appRow(suggested[s], paths, defaultId));
+        }
+        var others = data.others || [];
+        if (others.length > 0) {
+            sub.push({ text: qsTr("Other Applications…"), icon: "list", separatorBefore: sub.length > 0, submenu: function() {
+                var out = [];
+                for (var o = 0; o < others.length; ++o)
+                    out.push(appRow(others[o], paths, defaultId));
+                return out;
+            } });
+        }
+        sub.push({ text: qsTr("Run Custom Command…"), icon: "terminal", separatorBefore: sub.length > 0, action: function() { commandModal.showFor(paths[0]); } });
+        return sub;
+    }
+
+    function defaultAppRow(app, paths, defaultId, icon) {
+        return {
+            text: app.name,
+            icon: icon || "",
+            iconUrl: icon ? "" : (app.icon || ""),
+            checkable: true,
+            checked: app.id === defaultId,
+            action: function() { core.set_default_app(paths[0], app.id); }
+        };
+    }
+
+    function setDefaultMenu(paths, data) {
+        var recommended = data.recommended || [];
+        var recent = data.recent || [];
+        var defaultId = data.defaultId || "";
+        var used = {};
+        var sub = [];
+        for (var r = 0; r < recent.length; ++r) {
+            used[recent[r].id] = true;
+            sub.push(defaultAppRow(recent[r], paths, defaultId, "clock-counter-clockwise"));
+        }
+        for (var i = 0; i < recommended.length; ++i) {
+            if (used[recommended[i].id])
+                continue;
+            used[recommended[i].id] = true;
+            sub.push(defaultAppRow(recommended[i], paths, defaultId));
+        }
+        return sub;
+    }
+
+    function compressSubmenu(paths) {
+        function go(fmt) { core.compress(JSON.stringify(paths), fmt, ""); }
+        var sub = [
+            { text: qsTr(".zip Archive"), icon: "file-zip", action: function() { go("zip"); } },
+            { text: qsTr("Encrypted .zip…"), icon: "lock", action: function() { passwordModal.openFor({ kind: "compress", paths: paths, format: "zip_encrypted" }); } },
+            { text: qsTr(".tar.gz Archive"), icon: "archive", separatorBefore: true, action: function() { go("tar.gz"); } },
+            { text: qsTr(".7z Archive"), icon: "file-archive", action: function() { go("7z"); } },
+            { text: qsTr("Encrypted .7z…"), icon: "lock", action: function() { passwordModal.openFor({ kind: "compress", paths: paths, format: "7z" }); } }
+        ];
+        if (theme.showAdvancedArchives) {
+            sub.push({ text: ".tar.xz", icon: "archive", separatorBefore: true, action: function() { go("tar.xz"); } });
+            sub.push({ text: ".tar.zst", icon: "archive", action: function() { go("tar.zst"); } });
+            sub.push({ text: ".tar.bz2", icon: "archive", action: function() { go("tar.bz2"); } });
+            sub.push({ text: ".cpio", icon: "package", action: function() { go("cpio"); } });
+        }
+        return sub;
+    }
+
+    function sortMenuItems(items) {
+        var savedOrder = [];
+        try {
+            var raw = core.get_setting("contextMenuOrder");
+            if (raw && raw.length > 0) savedOrder = JSON.parse(raw);
+        } catch (e) {}
+        if (savedOrder.length === 0)
+            return items;
+        var copy = items.slice();
+        copy.sort(function(a, b) {
+            var ia = a.itemKey ? savedOrder.indexOf(a.itemKey) : -1;
+            var ib = b.itemKey ? savedOrder.indexOf(b.itemKey) : -1;
+            if (ia === -1 && ib === -1) return 0;
+            if (ia === -1) return 1;
+            if (ib === -1) return -1;
+            return ia - ib;
+        });
+        return copy;
+    }
+
+    function openItemMenu(pane, row, mx, my) {
+        if (chooserMode) return;
+        setActivePane(pane);
+        var paths = pane.selectedPaths();
+        var item = JSON.parse(pane.engine.item_json(row));
+        if (paths.length === 0)
+            paths = [item.path];
+        var kind = pane.engine.location_kind;
+        var single = paths.length === 1;
+        var m = [];
+
+        if (kind === "trash") {
+            m.push({ text: qsTr("Restore"), icon: "arrow-counter-clockwise", action: function() { core.restore_items(JSON.stringify(paths)); pane.clearSelection(); } });
+            m.push({ text: qsTr("Preview"), icon: "eye", shortcut: "Space", action: function() { quickLook.showFor(item.path); } });
+            m.push({ text: qsTr("Delete Permanently"), icon: "trash", danger: true, separatorBefore: true, shortcut: "Del", action: function() { window.deleteSelection(); } });
+            m.push({ text: qsTr("Properties"), icon: "info", separatorBefore: true, action: function() { window.showProperties(paths); } });
+            if (m.length === 0)
+                return;
+            contextMenu.model = m;
+            contextMenu.openAt(mx, my);
+            return;
+        }
+
+        var inArchive = kind === "archive";
+        m.push({ text: qsTr("Open"), icon: "arrow-square-out", itemKey: "open", action: function() { pane.openSelected(); } });
+        if (item.is_dir && !inArchive)
+            m.push({ text: qsTr("Open in New Tab"), icon: "tabs", itemKey: "new_tab", action: function() { for (var i = 0; i < paths.length; ++i) window.newTab(paths[i]); } });
+        if ((kind === "search" || kind === "recent" || kind === "starred") && item.parent_path)
+            m.push({ text: qsTr("Open Containing Folder"), icon: "folder-open", itemKey: "open_containing", action: function() {
+                var target = item.path;
+                searchInput.text = "";
+                pane.engine.set_path(item.parent_path);
+                pane.pendingSelect = [target];
+            } });
+        if (!item.is_dir && !inArchive) {
+            var openData = openWithData(paths);
+            var openSub = openWithMenu(paths, openData);
+            if (openSub.length > 0)
+                m.push({ text: qsTr("Open With…"), icon: "app-window", itemKey: "open_with", action: function() { openWithModal.showFor(paths); } });
+            var defSub = setDefaultMenu(paths, openData);
+            if (defSub.length > 0)
+                m.push({ text: qsTr("Set Default Application"), icon: "check-square", itemKey: "set_default", submenu: defSub });
+            if (core.is_archive_file(item.path)) {
+                m.push({ text: qsTr("Browse Archive"), icon: "folder-open", itemKey: "browse_archive", action: function() { pane.engine.set_path("archive://" + item.path + "#"); } });
+                m.push({ text: qsTr("Extract Here"), icon: "archive", itemKey: "extract", action: function() { core.extract(item.path, false, ""); } });
+                m.push({ text: qsTr("Extract to Folder"), icon: "folder-plus", itemKey: "extract", action: function() { core.extract(item.path, true, ""); } });
+            }
+        }
+        m.push({ text: qsTr("Quick Look"), icon: "eye", shortcut: "Space", itemKey: "quick_look", action: function() { quickLook.showFor(item.path); } });
+        if (!inArchive) {
+            var termDir = item.is_dir ? item.path : (item.parent_path || pane.engine.current_path);
+            m.push({ text: qsTr("Open in Terminal"), icon: "terminal", itemKey: "terminal", action: function() { core.open_terminal(termDir); } });
+
+            m.push({ text: qsTr("Cut"), icon: "scissors", shortcut: "Ctrl+X", itemKey: "cut", separatorBefore: true, action: function() { window.copySelection(true); } });
+            m.push({ text: qsTr("Copy"), icon: "copy", shortcut: "Ctrl+C", itemKey: "copy", action: function() { window.copySelection(false); } });
+            if (item.is_dir && single && native.clipboardHasFiles())
+                m.push({ text: qsTr("Paste Into Folder"), icon: "clipboard", itemKey: "paste", action: function() { window.pasteInto(item.path); } });
+            m.push({ text: qsTr("Copy Path"), icon: "copy-simple", shortcut: "Ctrl+Shift+C", itemKey: "copy_path", action: function() { window.copyPathOfSelection(); } });
+            if (single)
+                m.push({ text: qsTr("Rename…"), icon: "pencil-simple", shortcut: "F2", itemKey: "rename", action: function() { pane.startRename(); } });
+            else
+                m.push({ text: qsTr("Rename %1 Items…").arg(paths.length), icon: "pencil-simple", shortcut: "F2", itemKey: "rename", action: function() { batchRename.showFor(pane.selectedItems()); } });
+            if (kind === "dir") {
+                m.push({ text: qsTr("Duplicate"), icon: "copy-simple", itemKey: "duplicate", action: function() { core.transfer(JSON.stringify(paths), pane.engine.current_path, "copy", "rename"); } });
+                m.push({ text: qsTr("Make Link"), icon: "link", itemKey: "make_link", action: function() { core.transfer(JSON.stringify(paths), pane.engine.current_path, "link", "rename"); } });
+            }
+            if (theme.shareViaLinkEnabled) {
+                var shareSub = [
+                    {
+                        text: qsTr("Share via Link"),
+                        icon: "link",
+                        action: function() {
+                            if (!core.is_cloudflared_installed()) {
+                                core.install_cloudflared();
+                                return;
+                            }
+                            window.toast("info", qsTr("Preparing link share..."));
+                            core.start_share(JSON.stringify(paths));
+                        }
+                    }
+                ];
+                m.push({ text: qsTr("Share…"), icon: "share-network", itemKey: "share", submenu: shareSub });
+            }
+            m.push({ text: qsTr("Compress"), icon: "file-archive", itemKey: "compress", submenu: compressSubmenu(paths) });
+
+            var starred = item.starred === true;
+            m.push({ text: starred ? qsTr("Unstar") : qsTr("Star"), icon: "star", itemKey: "star", separatorBefore: true, action: function() { core.set_starred(JSON.stringify(paths), !starred); } });
+            if (item.is_dir && single) {
+                var marked = core.is_bookmarked(item.path);
+                m.push({ text: marked ? qsTr("Remove from Sidebar") : qsTr("Add to Sidebar"), icon: "push-pin", itemKey: "pin", action: function() {
+                    if (marked)
+                        core.remove_bookmark(item.path);
+                    else
+                        core.add_bookmark(item.path);
+                } });
+            }
+            var scripts = JSON.parse(core.scripts_json() || "[]");
+            if (scripts.length > 0)
+                m.push({ text: qsTr("Scripts"), icon: "scroll", itemKey: "scripts", submenu: menuFromTree(scripts, function(script) {
+                    core.run_script(script, kind === "dir" ? pane.engine.current_path : item.parent_path, JSON.stringify(paths));
+                }) });
+            if (!native.isAdmin && item.is_dir && single)
+                m.push({ text: qsTr("Open as Administrator"), icon: "shield-check", itemKey: "admin", action: function() { core.open_as_admin(item.path); } });
+
+            m.push({ text: qsTr("Move to Trash"), icon: "trash", shortcut: "Del", danger: true, itemKey: "delete", separatorBefore: true, action: function() { window.trashSelection(); } });
+            m.push({ text: qsTr("Delete Permanently"), icon: "x-circle", shortcut: "Shift+Del", itemKey: "permanent_delete", danger: true, action: function() { window.deleteSelection(); } });
+        }
+        m.push({ text: qsTr("Properties"), icon: "info", shortcut: "Alt+Enter", itemKey: "properties", separatorBefore: true, enabled: !inArchive, action: function() { window.showProperties(paths); } });
+
+        function shouldIncludeItem(row) {
+            if (!row || !row.itemKey) return true;
+            if (theme.contextMenuMode === "minimal") {
+                if (["open", "cut", "copy", "paste", "delete", "permanent_delete", "select_all"].indexOf(row.itemKey) !== -1)
+                    return false;
+            } else if (theme.contextMenuMode === "custom") {
+                if (theme.disabledMenuItems && theme.disabledMenuItems[row.itemKey])
+                    return false;
+            }
+            return true;
+        }
+        contextMenu.model = sortMenuItems(m.filter(shouldIncludeItem));
+        contextMenu.openAt(mx, my);
+    }
+
+    function openEmptyMenu(pane, mx, my) {
+        if (chooserMode) return;
+        setActivePane(pane);
+        var e = pane.engine;
+        var kind = e.location_kind;
+        var m = [];
+        if (kind === "trash") {
+            if (e.item_count > 0) {
+                m.push({ text: qsTr("Empty Trash"), icon: "trash", danger: true, itemKey: "empty_trash", action: function() { window.confirmEmptyTrash(); } });
+                m.push({ text: qsTr("Select All"), icon: "selection-all", shortcut: "Ctrl+A", itemKey: "select_all", separatorBefore: true, action: function() { pane.selectAll(); } });
+            }
+            if (m.length === 0)
+                return;
+            contextMenu.model = m;
+            contextMenu.openAt(mx, my);
+            return;
+        }
+        if (kind === "dir") {
+            var newSub = [
+                { text: qsTr("Folder"), icon: "folder-plus", shortcut: "Ctrl+Shift+N", action: function() { inputModal.showNewFolder(); } },
+                { text: qsTr("Empty File"), icon: "file-plus", action: function() { inputModal.showNewFile(); } },
+                { text: qsTr("Symlink…"), icon: "link", action: function() { symlinkModal.openFor(e.current_path); } }
+            ];
+            var templates = JSON.parse(core.templates_json() || "[]");
+            if (templates.length > 0) {
+                newSub.push({ text: qsTr("From Template"), icon: "file-doc", submenu: menuFromTree(templates, function(tpl) {
+                    var created = core.create_from_template(tpl, e.current_path);
+                    if (created.length > 0) {
+                        pane.pendingSelect = [created];
+                        pane.pendingRename = true;
+                    }
+                }) });
+            }
+            m.push({ text: qsTr("New…"), icon: "plus-circle", itemKey: "new", submenu: newSub });
+            if (native.clipboardHasFiles())
+                m.push({ text: qsTr("Paste"), icon: "clipboard", shortcut: "Ctrl+V", itemKey: "paste", separatorBefore: true, action: function() { window.pasteInto(e.current_path); } });
+        }
+        if (e.item_count > 0) {
+            m.push({ text: qsTr("Select All"), icon: "selection-all", shortcut: "Ctrl+A", itemKey: "select_all", separatorBefore: kind !== "dir", action: function() { pane.selectAll(); } });
+            m.push({ text: qsTr("Select by Pattern…"), icon: "selection", shortcut: "Ctrl+S", itemKey: "select_pattern", action: function() { patternModal.openFor(); } });
+        }
+        if (kind === "dir") {
+            m.push({ text: qsTr("Open Terminal Here"), icon: "terminal", itemKey: "terminal", separatorBefore: true, action: function() { core.open_terminal(e.current_path); } });
+            var marked = core.is_bookmarked(e.current_path);
+            m.push({ text: marked ? qsTr("Remove from Sidebar") : qsTr("Add to Sidebar"), icon: "push-pin", shortcut: "Ctrl+D", itemKey: "pin", action: function() {
+                if (marked)
+                    core.remove_bookmark(e.current_path);
+                else
+                    core.add_bookmark(e.current_path);
+            } });
+            var scripts = JSON.parse(core.scripts_json() || "[]");
+            if (scripts.length > 0)
+                m.push({ text: qsTr("Scripts"), icon: "scroll", itemKey: "scripts", submenu: menuFromTree(scripts, function(script) { core.run_script(script, e.current_path, "[]"); }) });
+            if (!native.isAdmin)
+                m.push({ text: qsTr("Open as Administrator"), icon: "shield-check", itemKey: "admin", action: function() { core.open_as_admin(e.current_path); } });
+            m.push({ text: qsTr("Properties"), icon: "info", itemKey: "properties", separatorBefore: true, action: function() { window.showProperties([e.current_path]); } });
+        }
+
+        function shouldIncludeEmpty(row) {
+            if (!row || !row.itemKey) return true;
+            if (theme.contextMenuMode === "minimal") {
+                if (["open", "cut", "copy", "paste", "delete", "permanent_delete", "select_all"].indexOf(row.itemKey) !== -1)
+                    return false;
+            } else if (theme.contextMenuMode === "custom") {
+                if (theme.disabledMenuItems && theme.disabledMenuItems[row.itemKey])
+                    return false;
+            }
+            return true;
+        }
+        contextMenu.model = sortMenuItems(m.filter(shouldIncludeEmpty));
+        contextMenu.openAt(mx, my);
+    }
+
     SeabunnyMenu {
         id: contextMenu
-
-        property var currentTargetItem: null
-        property bool isItemMenu: false
-
         menuMinWidth: 230
         menuMaxWidth: 340
-
-        readonly property bool insideTrash: engine.trash_root.length > 0
-            && engine.current_path === engine.trash_root
-
-        function targetPath() {
-            if (!currentTargetItem)
-                return "";
-            if (engine.is_searching_everywhere)
-                return currentTargetItem.path || "";
-            return engine.current_path + "/" + currentTargetItem.name;
-        }
-
-        function selectedPaths() {
-            var items = gridContainer.getSelectedItems();
-            var out = [];
-            for (var i = 0; i < items.length; ++i) {
-                var it = items[i];
-                out.push(engine.is_searching_everywhere
-                    ? it.path
-                    : (engine.current_path + "/" + it.name));
-            }
-            return out;
-        }
-
-        function compressSubmenu(paths) {
-            function doCompress(fmt) {
-                contextMenu.close();
-                engine.compress_items_with_options(JSON.stringify(paths), fmt, "");
-            }
-            var sub = [
-                { text: ".zip Archive", icon: "file-zip", action: function() { doCompress("zip"); } },
-                { text: "Encrypted .zip…", icon: "lock", action: function() {
-                    contextMenu.close();
-                    passwordModal.openFor(paths, "zip_encrypted");
-                } },
-                { text: ".tar.gz Archive", icon: "archive", separatorBefore: true, action: function() { doCompress("tar.gz"); } },
-                { text: ".7z Archive", icon: "file-archive", action: function() { doCompress("7z"); } }
+    }
+    SeabunnyMenu {
+        id: crumbMenu
+        menuMinWidth: 200
+        function showFor(path, x, y) {
+            if (path.indexOf("/") !== 0)
+                return;
+            model = [
+                { text: qsTr("Open in New Tab"), icon: "tabs", action: function() { window.newTab(path); } },
+                { text: qsTr("Paste Into Folder"), icon: "clipboard", enabled: native.clipboardHasFiles(), action: function() { window.pasteInto(path); } },
+                { text: qsTr("Copy Path"), icon: "copy-simple", action: function() { native.setClipboardText(path); window.toast("info", qsTr("Path copied")); } },
+                { text: qsTr("Add to Sidebar"), icon: "push-pin", action: function() { core.add_bookmark(path); } },
+                { text: qsTr("Properties"), icon: "info", separatorBefore: true, action: function() { window.showProperties([path]); } }
             ];
-            if (theme.showAdvancedArchives) {
-                sub.push({ text: ".tar.xz Archive", icon: "archive", separatorBefore: true, action: function() { doCompress("tar.xz"); } });
-                sub.push({ text: ".tar.zst Archive", icon: "archive", action: function() { doCompress("tar.zst"); } });
-                sub.push({ text: ".tar.bz2 Archive", icon: "archive", action: function() { doCompress("tar.bz2"); } });
-                sub.push({ text: ".cpio Archive", icon: "package", action: function() { doCompress("cpio"); } });
-            }
-            return sub;
-        }
-
-        function buildItemModel() {
-            var it = currentTargetItem;
-            if (!it)
-                return [];
-            var isSearching = engine.is_searching_everywhere;
-            var itemPath = targetPath();
-            var paths = selectedPaths();
-            if (paths.length === 0)
-                paths = [itemPath];
-            var parentPath = it.parent_path || "";
-            var inTrash = contextMenu.insideTrash;
-            var m = [];
-
-            if (engine.archive_path.length) {
-                m.push({text: "Open", icon: "arrow-square-out", action: function() {
-                    if (it.is_dir) engine.set_path(itemPath); else engine.open_item(itemPath);
-                }});
-                if (it.is_dir) m.push({text: "Open in New Tab", icon: "folder-open", action: function() { window.openFolderTab(itemPath, false); }});
-                m.push({text: "Copy", icon: "copy", shortcut: "Ctrl+C", action: function() { engine.copy_items(JSON.stringify(paths), false); }});
-                m.push({text: "Extract Selected", icon: "archive", enabled: !engine.archive_busy, action: function() { engine.extract_current_archive(JSON.stringify(paths)); }});
-                return m;
-            }
-
-            m.push({ text: "Open", icon: "arrow-square-out", action: function() {
-                if (it.is_dir) {
-                    engine.set_path(itemPath);
-                    if (engine.is_searching_everywhere) {
-                        engine.clear_search_everywhere();
-                        searchInput.text = "";
-                    }
-                } else {
-                    engine.open_item(itemPath);
-                }
-            } });
-
-            if (!inTrash) m.push({ text: "Open With…", icon: "squares-four", action: function() {
-                openWithModal.showFor(paths);
-            } });
-
-            if ((it.is_dir || engine.is_archive_file(itemPath)) && !inTrash) m.push({text: "Open in New Tab", icon: "folder-open", action: function() { window.openFolderTab(itemPath, false); }});
-
-            // Hide "Open Containing Folder" when the item already lives in the
-            // folder we are browsing.
-            var showContaining = isSearching
-                || (parentPath.length > 0 && parentPath !== engine.current_path);
-            if (showContaining) {
-                m.push({ text: "Open Containing Folder", icon: "folder-open", action: function() {
-                    if (parentPath.length > 0) {
-                        engine.clear_search_everywhere();
-                        searchInput.text = "";
-                        engine.set_path(parentPath);
-                    }
-                } });
-            }
-
-            m.push({ text: "Open in Terminal", icon: "terminal", action: function() {
-                var dir = it.is_dir ? itemPath : (parentPath.length > 0 ? parentPath : engine.current_path);
-                engine.open_terminal(dir);
-            } });
-
-            if (it.is_dir && !inTrash) {
-                m.push({ text: window.isFavorite(itemPath) ? "Unpin from Favorites" : "Pin to Favorites", icon: "star", action: function() {
-                    window.saveFavorite(itemPath, it.name, window.isFavorite(itemPath));
-                } });
-            }
-
-            m.push({ text: "Cut", icon: "scissors", shortcut: "Ctrl+X", separatorBefore: true, action: function() {
-                engine.copy_items(JSON.stringify(paths), true);
-            } });
-            m.push({ text: "Copy", icon: "copy", shortcut: "Ctrl+C", action: function() {
-                engine.copy_items(JSON.stringify(paths), false);
-            } });
-            m.push({ text: "Rename", icon: "pencil-simple", shortcut: "F2", enabled: !inTrash, action: function() {
-                inputModal.showRename(it.name, parentPath || "/", it.is_dir);
-            } });
-
-            var isArchive = !isSearching && it.is_dir === false
-                && engine.is_archive_file(itemPath);
-            if (isArchive) {
-                m.push({ text: "Extract Here", icon: "archive", action: function() {
-                    engine.extract_archive(itemPath, false);
-                } });
-                m.push({ text: "Extract to Folder", icon: "folder-open", action: function() {
-                    engine.extract_archive(itemPath, true);
-                } });
-            }
-
-            m.push({ text: "Compress", icon: "file-archive", submenu: compressSubmenu(paths) });
-
-            if (inTrash) {
-                m.push({ text: "Restore", icon: "arrow-counter-clockwise", separatorBefore: true, action: function() {
-                    engine.restore_trash_item(itemPath);
-                } });
-            } else {
-                m.push({ text: "Move to Trash", icon: "trash", shortcut: "Del", danger: true, separatorBefore: true, action: function() {
-                    engine.trash_items(JSON.stringify(paths));
-                    gridContainer.clearSelection();
-                } });
-            }
-
-            m.push({ text: "Properties", icon: "info", shortcut: "Alt+Enter", action: function() {
-                propsModal.showInfo(itemPath);
-            } });
-
-            return m;
-        }
-
-        function buildEmptyModel() {
-            var m = [];
-            if (engine.archive_path.length) {
-                return [{text: "Extract Entire Archive", icon: "archive", enabled: !engine.archive_busy,
-                         action: function() { engine.extract_current_archive("[]"); }},
-                        {text: "Select All", icon: "check-square", shortcut: "Ctrl+A", action: function() { gridContainer.selectAll(); }}];
-            }
-            m.push({ text: window.isFavorite(engine.current_path) ? "Unpin This Folder" : "Pin This Folder", icon: "star", action: function() {
-                window.saveFavorite(engine.current_path, engine.current_dir_name || "Home", window.isFavorite(engine.current_path));
-            } });
-            m.push({ text: "New Folder", icon: "folder-plus", shortcut: "Ctrl+Shift+N", action: function() {
-                inputModal.showNewFolder();
-            } });
-            m.push({ text: "New Text File", icon: "file-plus", action: function() {
-                inputModal.showNewFile();
-            } });
-            m.push({ text: "Open Terminal Here", icon: "terminal", action: function() {
-                engine.open_terminal(engine.current_path);
-            } });
-            if (engine.has_clipboard) {
-                m.push({ text: "Paste", icon: "clipboard", shortcut: "Ctrl+V", action: function() {
-                    window.triggerPaste();
-                } });
-            }
-            m.push({ text: "Select All", icon: "check-square", shortcut: "Ctrl+A", separatorBefore: true, action: function() {
-                gridContainer.selectAll();
-            } });
-            return m;
-        }
-
-        function showItemMenu(item, mx, my) {
-            if (window.chooserMode) return;
-            currentTargetItem = item;
-            isItemMenu = true;
-            model = buildItemModel();
-            openAt(mx, my);
-        }
-
-        function showEmptyMenu(mx, my) {
-            if (window.chooserMode) return;
-            engine.sync_shared_state();
-            currentTargetItem = null;
-            isItemMenu = false;
-            model = buildEmptyModel();
-            openAt(mx, my);
+            openAt(x, y);
         }
     }
 
     SeabunnyMenu {
-        id: favoriteMenu
-        function showRestore(anchor) {
-            if (window.chooserMode) return;
-            model = [{ text: "Restore Default Places", icon: "arrow-counter-clockwise", action: function() {
-                var value = Sidebar.layout(JSON.stringify(window.sidebarLayout));
-                value.hidden = [];
-                window.saveSidebarLayout(value);
-            } }];
-            openRightOf(anchor);
-        }
-        function showFor(item, anchor) {
-            if (window.chooserMode) return;
-            var entries = [];
-            if (item.favorite) entries.push({ text: "Rename Favorite", icon: "pencil-simple", action: function() { favoritePrompt.edit(item); } });
-            entries.push({ text: item.favorite ? "Remove Favorite" : "Remove from Sidebar", icon: "minus", action: function() { window.removeSidebar(item); } });
-            entries.push({ text: "Folder Icon", icon: "folder", submenu: ["folder", "folder-open", "image", "music", "video", "code", "camera", "star"].map(function(icon) {
-                return { text: icon, icon: icon, action: function() {
-                    var value = Sidebar.layout(JSON.stringify(window.sidebarLayout));
-                    value.icons[item.id] = icon;
-                    window.saveSidebarLayout(value);
-                } };
-            }) });
-            entries.push({ text: "Restore Default Places", icon: "arrow-counter-clockwise", action: function() {
-                var value = Sidebar.layout(JSON.stringify(window.sidebarLayout));
-                value.hidden = [];
-                window.saveSidebarLayout(value);
-            } });
-            model = entries;
-            openRightOf(anchor);
+        id: sidebarMenu
+        menuMinWidth: 210
+        function showAt(px, py) {
+            model = [
+                {
+                    text: sidebar.expanded ? qsTr("Collapse Sidebar") : qsTr("Expand Sidebar"),
+                    icon: sidebar.expanded ? "sidebar-simple" : "sidebar",
+                    action: function() { sidebar.expanded = !sidebar.expanded; }
+                },
+                {
+                    text: qsTr("Customize Sidebar…"),
+                    icon: "sliders-horizontal",
+                    separatorBefore: true,
+                    action: function() { customizePlaces.open(); }
+                },
+                {
+                    text: qsTr("Add SMB Share…"),
+                    icon: "network",
+                    action: function() { window.openSmbEditor({}); }
+                }
+            ];
+            openAt(px, py);
         }
     }
 
-    SeabunnyTextPrompt {
-        id: favoritePrompt
-        property string folderPath: ""
-        title: "Rename Favorite"
-        label: "Changes only the sidebar label, not the folder"
-        confirmText: "Save"
-        function edit(item) {
-            folderPath = item.path;
-            initialText = item.name;
-            open();
-        }
-        onAccepted: function(text) { window.saveFavorite(folderPath, text, false); }
-    }
+    SeabunnyMenu {
+        id: searchSettingsMenu
+        menuMinWidth: 260
+        menuMaxWidth: 320
+        model: []
 
-    // ==========================================
-    // INPUT MODAL (New Folder, New File, Rename)
-    // ==========================================
-    SeabunnyTextPrompt {
-        id: inputModal
-
-        property string mode: "new_folder"
-        property string targetItemName: ""
-        property string targetDirectory: ""
-
-        function showNewFolder() {
-            if (window.chooserMode) return;
-            mode = "new_folder";
-            title = "New Folder";
-            label = "Enter a name for the new folder";
-            placeholder = "Folder name";
-            initialText = "New Folder";
-            confirmText = "Save";
-            selectBasename = false;
-            open();
+        Text {
+            Layout.leftMargin: 8
+            Layout.topMargin: 4
+            text: qsTr("SEARCH SCOPE")
+            color: theme.textMuted
+            font.pixelSize: theme.fs(10)
+            font.bold: true
+            font.letterSpacing: 0.8
         }
 
-        function showNewFile() {
-            if (window.chooserMode) return;
-            mode = "new_file";
-            title = "New File";
-            label = "Enter a name for the new file";
-            placeholder = "File name";
-            initialText = "Untitled.txt";
-            confirmText = "Save";
-            selectBasename = false;
-            open();
+        SeabunnyMenuItem {
+            text: qsTr("Filter This Folder")
+            icon: "folder"
+            checkable: true
+            checked: !engine.is_searching_everywhere
+            onTriggered: {
+                if (engine.is_searching_everywhere) {
+                    engine.clear_search();
+                    if (searchInput.text.trim().length > 0)
+                        engine.set_filter(searchInput.text.trim());
+                }
+            }
         }
 
-        function showRename(oldName, directory, isDirectory) {
-            if (window.chooserMode) return;
-            mode = "rename";
-            targetItemName = oldName;
-            targetDirectory = directory || engine.current_path;
-            title = "Rename";
-            label = "Enter a new name";
-            initialText = oldName;
-            confirmText = "Rename";
-            selectBasename = !isDirectory;
-            open();
+        SeabunnyMenuItem {
+            text: qsTr("Search Subfolders")
+            icon: "tree-structure"
+            checkable: true
+            checked: engine.is_searching_everywhere && window.searchScope === "folder"
+            onTriggered: {
+                if (engine.is_searching_everywhere && window.searchScope === "folder") {
+                    engine.clear_search();
+                    if (searchInput.text.trim().length > 0)
+                        engine.set_filter(searchInput.text.trim());
+                    return;
+                }
+                window.searchScope = "folder";
+                var q = searchInput.text.trim();
+                if (q.length > 0) {
+                    engine.set_filter("");
+                    engine.search(q, "folder", theme.searchContents);
+                } else {
+                    searchInput.forceActiveFocus();
+                }
+            }
         }
 
-        onAccepted: function(text) {
-            var val = (text || "").trim();
-            if (val.length === 0)
-                return;
-            if (mode === "new_folder") {
-                engine.create_folder(engine.current_path, val);
-            } else if (mode === "new_file") {
-                engine.create_file(engine.current_path, val);
-            } else if (mode === "rename") {
-                engine.rename_item(targetDirectory, targetItemName, val);
+        SeabunnyMenuItem {
+            text: qsTr("Search Everywhere")
+            icon: "globe"
+            checkable: true
+            checked: engine.is_searching_everywhere && window.searchScope === "home"
+            onTriggered: {
+                if (engine.is_searching_everywhere && window.searchScope === "home") {
+                    engine.clear_search();
+                    if (searchInput.text.trim().length > 0)
+                        engine.set_filter(searchInput.text.trim());
+                    return;
+                }
+                window.searchScope = "home";
+                var q = searchInput.text.trim();
+                if (q.length > 0) {
+                    engine.set_filter("");
+                    engine.search(q, "home", theme.searchContents);
+                } else {
+                    searchInput.forceActiveFocus();
+                }
+            }
+        }
+
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.topMargin: 4; Layout.bottomMargin: 4; color: theme.separator }
+
+        Text {
+            Layout.leftMargin: 8
+            text: qsTr("SEARCH OPTIONS")
+            color: theme.textMuted
+            font.pixelSize: theme.fs(10)
+            font.bold: true
+            font.letterSpacing: 0.8
+        }
+
+        SeabunnySwitch {
+            label: qsTr("Search File Contents")
+            checked: theme.searchContents
+            onToggled: function(c) {
+                theme.searchContents = c;
+                if (engine.is_searching_everywhere && searchInput.text.trim().length > 0)
+                    engine.search(searchInput.text.trim(), window.searchScope, theme.searchContents);
             }
         }
     }
 
-    // ==========================================
-    // OPEN WITH
-    // ==========================================
+    SeabunnyDialog {
+        id: symlinkModal
+        title: qsTr("Create Symlink")
+        dialogWidth: 420
+        property string inDir: ""
+
+        function openFor(dirPath) {
+            inDir = dirPath;
+            targetField.text = "";
+            linkNameField.text = "";
+            linkNameField.autoNamed = false;
+            open();
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            Text {
+                text: qsTr("Target file or folder path:")
+                color: theme.textMain
+                font.pixelSize: theme.fs(12)
+            }
+            SeabunnyTextField {
+                id: targetField
+                Layout.fillWidth: true
+                placeholderText: "/path/to/target/file"
+                onTextChanged: {
+                    if (linkNameField.text.length === 0 || linkNameField.autoNamed) {
+                        var p = text.trim();
+                        var parts = p.split("/").filter(function(x) { return x.length > 0; });
+                        if (parts.length > 0) {
+                            linkNameField.text = parts[parts.length - 1];
+                            linkNameField.autoNamed = true;
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: qsTr("Symlink name in %1:").arg(symlinkModal.inDir)
+                color: theme.textMain
+                font.pixelSize: theme.fs(12)
+                elide: Text.ElideMiddle
+                Layout.fillWidth: true
+            }
+            SeabunnyTextField {
+                id: linkNameField
+                property bool autoNamed: false
+                Layout.fillWidth: true
+                placeholderText: qsTr("Link name")
+                onTextEdited: autoNamed = false
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Item { Layout.fillWidth: true }
+                SeabunnyButton {
+                    text: qsTr("Cancel")
+                    variant: "text"
+                    onClicked: symlinkModal.close()
+                }
+                SeabunnyButton {
+                    text: qsTr("Create Link")
+                    variant: "filled"
+                    enabled: targetField.text.trim().length > 0 && linkNameField.text.trim().length > 0
+                    onClicked: {
+                        var target = targetField.text.trim();
+                        var linkName = linkNameField.text.trim();
+                        var fullLink = symlinkModal.inDir + "/" + linkName;
+                        symlinkModal.close();
+                        if (core.create_symlink(target, fullLink)) {
+                            window.activePane.pendingSelect = [fullLink];
+                            window.activePane.engine.refresh();
+                            window.toast("info", qsTr("Symlink created"));
+                        } else {
+                            window.toast("error", qsTr("Could not create symlink"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    SeabunnyMenu {
+        id: placeMenu
+        menuMinWidth: 220
+        function showFor(place, x, y) {
+            var all = JSON.parse(core.all_places_json() || "[]");
+            var idx = all.findIndex(function(p) { return p.id === place.id; });
+            var m = [];
+            if (place.kind === "smb") {
+                if (place.path && place.connected)
+                    m.push({ text: qsTr("Open in New Tab"), icon: "tabs", action: function() { window.newTab(place.path); } });
+                if (!place.connected)
+                    m.push({ text: qsTr("Connect"), icon: "plug", action: function() { core.connect_smb(place.profile_id, "", false); } });
+                if (place.connected)
+                    m.push({ text: qsTr("Disconnect"), icon: "plug-slash", action: function() { core.disconnect_smb(place.profile_id); } });
+                m.push({ text: qsTr("Edit Share…"), icon: "pencil-simple", separatorBefore: true, action: function() { window.openSmbEditor(place); } });
+                m.push({ text: qsTr("Remove Share"), icon: "x", danger: true, action: function() { window.removeSmbShare(place.profile_id, place.name); } });
+                m.push({ text: qsTr("Move Up"), icon: "arrow-up", separatorBefore: true, enabled: idx > 0, action: function() { core.move_place(place.id, idx - 1); } });
+                m.push({ text: qsTr("Move Down"), icon: "arrow-down", enabled: idx >= 0 && idx < all.length - 1, action: function() { core.move_place(place.id, idx + 1); } });
+                m.push({ text: qsTr("Add SMB Share…"), icon: "plus", separatorBefore: true, action: function() { window.openSmbEditor({}); } });
+                model = m;
+                openAt(x, y);
+                return;
+            }
+            if (place.path && place.path.indexOf("/") === 0)
+                m.push({ text: qsTr("Open in New Tab"), icon: "tabs", action: function() { window.newTab(place.path); } });
+            if (place.kind === "trash")
+                m.push({ text: qsTr("Empty Trash"), icon: "trash", danger: true, enabled: !core.trash_empty, action: function() { window.confirmEmptyTrash(); } });
+            if (place.kind === "place" || place.kind === "bookmark")
+                m.push({ text: qsTr("Rename / Change Folder…"), icon: "pencil-simple", action: function() { placeEdit.openFor(place); } });
+            m.push({ text: qsTr("Move Up"), icon: "arrow-up", separatorBefore: true, enabled: idx > 0, action: function() { core.move_place(place.id, idx - 1); } });
+            m.push({ text: qsTr("Move Down"), icon: "arrow-down", enabled: idx >= 0 && idx < all.length - 1, action: function() { core.move_place(place.id, idx + 1); } });
+            if (place.kind === "bookmark")
+                m.push({ text: qsTr("Remove from Sidebar"), icon: "x", danger: true, separatorBefore: true, action: function() { core.remove_bookmark(place.path); } });
+            else
+                m.push({ text: qsTr("Hide from Sidebar"), icon: "eye-slash", separatorBefore: true, action: function() { core.set_place_hidden(place.id, true); } });
+            m.push({ text: qsTr("Customize Sidebar…"), icon: "sliders-horizontal", action: function() { customizePlaces.open(); } });
+            model = m;
+            openAt(x, y);
+        }
+    }
+    SeabunnyMenu {
+        id: rmbDropMenu
+        menuMinWidth: 200
+        property var dropPaths: []
+        property string dropDest: ""
+        function showAt(px, py, paths, dest) {
+            dropPaths = paths;
+            dropDest = dest;
+            model = [
+                { text: qsTr("Copy Here"), icon: "copy", action: function() { window.transfer(rmbDropMenu.dropPaths, rmbDropMenu.dropDest, "copy"); } },
+                { text: qsTr("Move Here"), icon: "arrows-out-cardinal", action: function() { window.transfer(rmbDropMenu.dropPaths, rmbDropMenu.dropDest, "move"); } },
+                { text: qsTr("Link Here"), icon: "link", action: function() { core.transfer(JSON.stringify(rmbDropMenu.dropPaths), rmbDropMenu.dropDest, "link", "rename"); } },
+                { text: qsTr("Cancel"), icon: "x", danger: true, separatorBefore: true, action: function() {} }
+            ];
+            openAt(px, py);
+        }
+    }
+    SeabunnyMenu {
+        id: viewMenuPopup
+        menuMinWidth: 290
+        menuMaxWidth: 340
+        model: []
+
+        Text { Layout.leftMargin: 8; Layout.topMargin: 4; text: qsTr("VIEW MODE"); color: theme.textMuted; font.pixelSize: theme.fs(10); font.bold: true; font.letterSpacing: 0.8 }
+        SeabunnySegmented {
+            Layout.fillWidth: true
+            Layout.leftMargin: 4; Layout.rightMargin: 4
+            options: [{ value: "grid", label: qsTr("Grid"), icon: "squares-four" }, { value: "list", label: qsTr("List"), icon: "list" }]
+            value: engine.view_mode
+            onSelected: function(v) { engine.set_view(v); }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8; Layout.rightMargin: 8
+            Text { text: qsTr("Icon size"); color: theme.textMain; font.pixelSize: theme.fs(12); Layout.fillWidth: true }
+            SeabunnyButton { icon: "magnifying-glass-minus"; variant: "tonal"; enabled: theme.zoomIndex > 0; onClicked: theme.stepZoom(-1) }
+            Text { text: Math.round(theme.zoom * 100) + "%"; color: theme.textMuted; font.pixelSize: theme.fs(11) }
+            SeabunnyButton { icon: "magnifying-glass-plus"; variant: "tonal"; enabled: theme.zoomIndex < theme.zoomLevels.length - 1; onClicked: theme.stepZoom(1) }
+        }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.topMargin: 4; Layout.bottomMargin: 4; color: theme.separator }
+        Text { Layout.leftMargin: 8; text: qsTr("SORT BY"); color: theme.textMuted; font.pixelSize: theme.fs(10); font.bold: true; font.letterSpacing: 0.8 }
+        SeabunnyMenuItem { text: qsTr("Name"); checkable: true; checked: engine.sort_by === "name"; onTriggered: engine.set_sort("name", engine.sort_ascending) }
+        SeabunnyMenuItem { text: qsTr("Date Modified"); checkable: true; checked: engine.sort_by === "modified"; onTriggered: engine.set_sort("modified", engine.sort_ascending) }
+        SeabunnyMenuItem { text: qsTr("Size"); checkable: true; checked: engine.sort_by === "size"; onTriggered: engine.set_sort("size", engine.sort_ascending) }
+        SeabunnyMenuItem { text: qsTr("Type"); checkable: true; checked: engine.sort_by === "type"; onTriggered: engine.set_sort("type", engine.sort_ascending) }
+        SeabunnySegmented {
+            Layout.fillWidth: true
+            Layout.leftMargin: 4; Layout.rightMargin: 4
+            options: [{ value: "asc", label: qsTr("Ascending"), icon: "sort-ascending" }, { value: "desc", label: qsTr("Descending"), icon: "sort-descending" }]
+            value: engine.sort_ascending ? "asc" : "desc"
+            onSelected: function(v) { engine.set_sort(engine.sort_by, v === "asc"); }
+        }
+        Text { Layout.leftMargin: 8; Layout.topMargin: 4; text: qsTr("FOLDERS"); color: theme.textMuted; font.pixelSize: theme.fs(10); font.bold: true; font.letterSpacing: 0.8 }
+        SeabunnySegmented {
+            Layout.fillWidth: true
+            Layout.leftMargin: 4; Layout.rightMargin: 4
+            options: [{ value: "first", label: qsTr("First") }, { value: "last", label: qsTr("Last") }, { value: "mixed", label: qsTr("Mixed") }]
+            value: engine.folder_position
+            onSelected: function(v) { engine.change_folder_position(v); }
+        }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.topMargin: 4; Layout.bottomMargin: 4; color: theme.separator }
+        SeabunnySwitch { label: qsTr("Show Hidden Files"); checked: window.showHidden; onToggled: window.toggleShowHidden() }
+        SeabunnySwitch { label: qsTr("Split View (F3)"); checked: window.splitView && window.activeView === "files"; onToggled: window.toggleSplit() }
+    }
     SeabunnyDialog {
         id: openWithModal
         title: "Open With"
@@ -4858,7 +2740,7 @@ ApplicationWindow {
         function showFor(items) {
             if (window.chooserMode || !items.length) return;
             paths = items.slice();
-            details = JSON.parse(engine.open_with_apps(JSON.stringify(paths)) || "{}");
+            details = JSON.parse(core.open_with_selection(JSON.stringify(paths)) || "{}");
             applications = details.apps || [];
             error = details.error || "";
             applicationSearch.text = "";
@@ -4870,7 +2752,7 @@ ApplicationWindow {
 
         function launch() {
             if (!selectedApp.length) return;
-            error = engine.open_with(JSON.stringify(paths), selectedApp,
+            error = core.launch_with(JSON.stringify(paths), selectedApp,
                                      details.canSetDefault && defaultApplication.checked);
             if (!error.length) close();
         }
@@ -5016,629 +2898,640 @@ ApplicationWindow {
         }
     }
 
-    // ==========================================
-    // PROPERTIES MODAL
-    // ==========================================
-    SeabunnyDialog {
-        id: propsModal
-        title: "Properties"
-        dialogWidth: 380
+    QuickLook { id: quickLook }
+    PropertiesDialog { id: propsDialog }
+    BatchRenameDialog { id: batchRename }
+    ConflictDialog { id: conflictDialog }
 
-        property var info: ({})
-        property int permissionMode: 0
-        property string permissionError: ""
-        readonly property bool permissionsEditable: !window.chooserMode && !!info.can_edit_permissions
-        readonly property bool permissionsChanged: permissionMode !== ((info.permission_mode || 0) & 0o777)
+    SeabunnyTextPrompt {
+        id: inputModal
+        property string mode: "new_folder"
 
-        function showInfo(path) {
-            info = JSON.parse(engine.get_item_info(path) || "{}");
-            permissionMode = (info.permission_mode || 0) & 0o777;
-            permissionError = "";
+        function showNewFolder() {
+            mode = "new_folder";
+            title = qsTr("New Folder");
+            label = qsTr("Enter a name for the new folder");
+            placeholder = qsTr("Folder name");
+            initialText = qsTr("New Folder");
+            confirmText = qsTr("Create");
+            selectBasename = false;
             open();
         }
 
-        function setAccess(shift, access) {
-            if (!permissionsEditable) return;
-            var mask = (info.is_dir ? 7 : 6) << shift;
-            permissionMode = (permissionMode & ~mask) | (access << shift);
-            permissionError = "";
-        }
-
-        function setExecutable(checked) {
-            if (!permissionsEditable || !info.is_regular) return;
-            permissionMode = checked ? permissionMode | 0o100 | ((permissionMode & 0o444) >> 2)
-                                     : permissionMode & ~0o111;
-            permissionError = "";
-        }
-
-        function savePermissions() {
-            if (!permissionsEditable || !permissionsChanged) return;
-            var result = JSON.parse(engine.set_item_permissions(info.path, info.permission_identity,
-                info.permission_mode, permissionMode) || "{}");
-            if (result.error) { permissionError = result.error; return; }
-            info = result;
-            close();
-        }
-
-        component PermissionRow: RowLayout {
-            property string label: ""
-            property int shift: 0
-            id: permissionRow
-            Layout.fillWidth: true
-            spacing: 12
-            Text {
-                text: permissionRow.label
-                color: theme.textMain
-                font.pixelSize: 12
-                Layout.preferredWidth: 80
-            }
-            ChooserComboBox {
-                objectName: "permissionAccess" + permissionRow.shift
-                Layout.fillWidth: true
-                Layout.preferredHeight: 36
-                enabled: propsModal.permissionsEditable
-                opacity: enabled ? 1 : 0.5
-                Accessible.name: permissionRow.label + " access"
-                readonly property int access: (propsModal.permissionMode >> permissionRow.shift) & (propsModal.info.is_dir ? 7 : 6)
-                model: {
-                    var options = propsModal.info.is_dir
-                        ? [{label: "None", value: 0}, {label: "List files only", value: 4},
-                           {label: "Access files", value: 5}, {label: "Create and delete files", value: 7}]
-                        : [{label: "None", value: 0}, {label: "Read-only", value: 4},
-                           {label: "Write-only", value: 2}, {label: "Read and write", value: 6}];
-                    if (!options.some(function(option) { return option.value === access; }))
-                        options.push({label: "Custom access (" + access.toString(8) + ")", value: access});
-                    return options;
-                }
-                textRole: "label"
-                currentIndex: model.findIndex(function(option) { return option.value === access; })
-                onActivated: function(index) { propsModal.setAccess(permissionRow.shift, model[index].value); }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            SeabunnyIcon {
-                visible: theme.usesGlyphIcons
-                name: propsModal.info.icon || "file"
-                size: 32
-                color: theme.primary
-            }
-            Image {
-                visible: !theme.usesGlyphIcons
-                source: theme.iconUrl(propsModal.info.icon_path || "")
-                Layout.preferredWidth: 32
-                Layout.preferredHeight: 32
-                sourceSize: Qt.size(32, 32)
-                fillMode: Image.PreserveAspectFit
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 2
-
-                Text {
-                    text: propsModal.info.name || "-"
-                    color: theme.textMain
-                    font.pixelSize: 16
-                    font.bold: true
-                    elide: Text.ElideMiddle
-                    Layout.fillWidth: true
-                }
-                Text {
-                    text: propsModal.info.is_symlink ? "Symbolic link" : propsModal.info.is_dir ? "Folder" : "File"
-                    color: theme.textMuted
-                    font.pixelSize: 11
-                }
-            }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            color: theme.separator
-        }
-
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 8
-
-            Text {
-                text: "Path: " + (propsModal.info.path || "-")
-                color: theme.textMuted
-                font.pixelSize: 11
-                wrapMode: Text.WrapAnywhere
-                Layout.fillWidth: true
-            }
-            Text {
-                text: "Size: " + (propsModal.info.size || "-")
-                color: theme.textMuted
-                font.pixelSize: 11
-            }
-            Text {
-                text: "Modified: " + (propsModal.info.modified || "-")
-                color: theme.textMuted
-                font.pixelSize: 11
-            }
-        }
-
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 4
-            Text {
-                text: "Permissions"
-                color: theme.textMain
-                font.pixelSize: 13
-                font.bold: true
-            }
-            PermissionRow { label: "Owner"; shift: 6 }
-            PermissionRow { label: "Group"; shift: 3 }
-            PermissionRow { label: "Others"; shift: 0 }
-            SeabunnySwitch {
-                id: executableSwitch
-                objectName: "makeExecutableSwitch"
-                visible: !!propsModal.info.is_regular
-                enabled: propsModal.permissionsEditable
-                label: "Make executable"
-                checked: (propsModal.permissionMode & 0o111) !== 0
-                onToggled: function(checked) {
-                    propsModal.setExecutable(checked);
-                    executableSwitch.checked = Qt.binding(function() { return (propsModal.permissionMode & 0o111) !== 0; });
-                }
-            }
-            Text {
-                visible: !!propsModal.info.is_regular
-                text: "Allow the owner and users with read access to run this file as a program."
-                color: theme.textMuted
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            Text {
-                visible: text.length > 0
-                text: propsModal.info.permissions_note || (!propsModal.info.permission_identity ? "Permissions are unavailable." : "")
-                color: theme.textMuted
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            Text {
-                objectName: "permissionError"
-                visible: text.length > 0
-                text: propsModal.permissionError
-                color: theme.danger
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Item { Layout.fillWidth: true }
-            SeabunnyButton {
-                text: propsModal.permissionsChanged ? "Cancel" : "Close"
-                onClicked: propsModal.close()
-            }
-            SeabunnyButton {
-                objectName: "savePermissionsButton"
-                text: "Save"
-                variant: "filled"
-                enabled: propsModal.permissionsEditable && propsModal.permissionsChanged
-                onClicked: propsModal.savePermissions()
-            }
-        }
-    }
-
-    // ==========================================
-    // UNIFIED VIEW DROPDOWN
-    // ==========================================
-    SeabunnyMenu {
-        id: viewMenuPopup
-        menuMinWidth: 288
-        menuMaxWidth: 360
-        model: []
-
-        Text {
-            Layout.leftMargin: 6
-            text: "VIEW"
-            color: theme.textMuted
-            font.pixelSize: 10
-            font.bold: true
-            font.letterSpacing: 0.8
-        }
-
-        SeabunnySegmented {
-            Layout.leftMargin: 2
-            options: [
-                { value: "grid", label: "Grid", icon: "squares-four" },
-                { value: "list", label: "List", icon: "list" }
-            ]
-            value: engine.view_mode
-            onSelected: function(v) { engine.view_mode = v; viewMenuPopup.close(); }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            Layout.topMargin: 4
-            Layout.bottomMargin: 4
-            Layout.leftMargin: 6
-            Layout.rightMargin: 6
-            color: theme.separator
-        }
-
-        Text {
-            Layout.leftMargin: 6
-            text: "SORT BY"
-            color: theme.textMuted
-            font.pixelSize: 10
-            font.bold: true
-            font.letterSpacing: 0.8
-        }
-
-        SeabunnyMenuItem {
-            text: "Name"
-            checkable: true
-            checked: engine.sort_by === "name"
-            onTriggered: { engine.set_sort("name", engine.sort_ascending); viewMenuPopup.close(); }
-        }
-        SeabunnyMenuItem {
-            text: "Date Modified"
-            checkable: true
-            checked: engine.sort_by === "modified"
-            onTriggered: { engine.set_sort("modified", engine.sort_ascending); viewMenuPopup.close(); }
-        }
-        SeabunnyMenuItem {
-            text: "Size"
-            checkable: true
-            checked: engine.sort_by === "size"
-            onTriggered: { engine.set_sort("size", engine.sort_ascending); viewMenuPopup.close(); }
-        }
-        SeabunnyMenuItem {
-            text: "Type"
-            checkable: true
-            checked: engine.sort_by === "type"
-            onTriggered: { engine.set_sort("type", engine.sort_ascending); viewMenuPopup.close(); }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            Layout.topMargin: 4
-            Layout.bottomMargin: 4
-            Layout.leftMargin: 6
-            Layout.rightMargin: 6
-            color: theme.separator
-        }
-
-        Text {
-            Layout.leftMargin: 6
-            text: "ORDER"
-            color: theme.textMuted
-            font.pixelSize: 10
-            font.bold: true
-            font.letterSpacing: 0.8
-        }
-
-        SeabunnySegmented {
-            Layout.leftMargin: 2
-            options: [
-                { value: "asc", label: "Ascending", icon: "sort-ascending" },
-                { value: "desc", label: "Descending", icon: "sort-descending" }
-            ]
-            value: engine.sort_ascending ? "asc" : "desc"
-            onSelected: function(v) { engine.set_sort(engine.sort_by, v === "asc"); }
-        }
-
-        Text {
-            Layout.leftMargin: 6
-            Layout.topMargin: 4
-            text: "FOLDERS"
-            color: theme.textMuted
-            font.pixelSize: 10
-            font.bold: true
-            font.letterSpacing: 0.8
-        }
-
-        SeabunnySegmented {
-            Layout.leftMargin: 2
-            options: [
-                { value: "first", label: "First" },
-                { value: "last", label: "Last" },
-                { value: "mixed", label: "Mixed" }
-            ]
-            value: engine.folder_position
-            onSelected: function(v) { engine.change_folder_position(v); }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 1
-            Layout.topMargin: 4
-            Layout.bottomMargin: 4
-            Layout.leftMargin: 6
-            Layout.rightMargin: 6
-            color: theme.separator
-        }
-
-        SeabunnySwitch {
-            Layout.topMargin: 2
-            label: "Show Hidden Files"
-            checked: engine.show_hidden
-            onToggled: engine.toggle_show_hidden()
-        }
-    }
-
-    // ==========================================
-    // PASSWORD PROMPT FOR ENCRYPTED ARCHIVES
-    // ==========================================
-    SeabunnyTextPrompt {
-        id: passwordModal
-
-        property var paths: []
-        property string format: "zip_encrypted"
-
-        title: "Encrypted Archive"
-        label: "Set a password to protect the archive"
-        placeholder: "Password"
-        confirmText: "Create"
-
-        function openFor(targetPaths, fmt) {
-            paths = targetPaths;
-            format = fmt;
-            initialText = "";
+        function showNewFile() {
+            mode = "new_file";
+            title = qsTr("New File");
+            label = qsTr("Enter a name for the new file");
+            placeholder = qsTr("File name");
+            initialText = qsTr("Untitled.txt");
+            confirmText = qsTr("Create");
+            selectBasename = false;
             open();
         }
 
         onAccepted: function(text) {
-            if (!text || text.length === 0)
+            var val = (text || "").trim();
+            if (val.length === 0)
                 return;
-            engine.compress_items_with_options(JSON.stringify(paths), format, text);
+            var created = mode === "new_folder"
+                ? core.create_folder(engine.current_path, val)
+                : core.create_file(engine.current_path, val);
+            if (created.length > 0)
+                window.activePane.pendingSelect = [created];
         }
     }
 
-    // ==========================================
-    // RIGHT-MOUSE DRAG DROP MENU
-    // ==========================================
-    SeabunnyMenu {
-        id: rmbDropMenu
-        menuMinWidth: 200
-        menuMaxWidth: 280
-
-        property var dropPaths: []
-        property string dropDest: ""
-
-        function showAt(px, py, paths, dest) {
-            // A same-directory drop is a silent no-op.
-            var sameDir = paths.length > 0;
-            for (var i = 0; i < paths.length; ++i) {
-                var p = paths[i];
-                var slash = p.lastIndexOf("/");
-                var parent = slash > 0 ? p.substring(0, slash) : "/";
-                if (parent !== dest) {
-                    sameDir = false;
-                    break;
-                }
-            }
-            if (sameDir) {
-                dragManager.end();
+    SeabunnyTextPrompt {
+        id: commandModal
+        property string targetPath: ""
+        function showFor(path) {
+            targetPath = path;
+            title = qsTr("Run Custom Command");
+            label = qsTr("Command to open “%1”. Use %f where the file should go (it is appended if omitted).").arg(path.split("/").pop());
+            placeholder = "mpv %f";
+            initialText = core.get_setting("openWithCustomCommand") || "";
+            confirmText = qsTr("Run");
+            selectBasename = false;
+            open();
+        }
+        onAccepted: function(text) {
+            var cmd = (text || "").trim();
+            if (cmd.length === 0)
                 return;
-            }
-            dropPaths = paths;
-            dropDest = dest;
-            model = [
-                { text: "Copy Here", icon: "copy", action: function() {
-                    window.handleDrop(rmbDropMenu.dropPaths, rmbDropMenu.dropDest, true);
-                } },
-                { text: "Move Here", icon: "arrows-out-cardinal", action: function() {
-                    window.handleDrop(rmbDropMenu.dropPaths, rmbDropMenu.dropDest, false);
-                } },
-                { text: "Link Here", icon: "link", action: function() {
-                    engine.create_symlinks(JSON.stringify(rmbDropMenu.dropPaths), rmbDropMenu.dropDest);
-                } },
-                { text: "Cancel", icon: "x", danger: true, separatorBefore: true, action: function() {
-                    dragManager.end();
-                } }
-            ];
-            openAt(px, py);
+            core.set_setting("openWithCustomCommand", cmd);
+            core.run_custom_command(cmd, targetPath);
         }
     }
 
-    // ==========================================
-    // CONFLICT RESOLUTION MODAL
-    // ==========================================
+    SeabunnyTextPrompt {
+        id: patternModal
+        title: qsTr("Select by Pattern")
+        label: qsTr("Wildcards: * matches anything, ? one character (e.g. *.jpg)")
+        placeholder: "*.jpg"
+        confirmText: qsTr("Select")
+        function openFor() { initialText = "*"; open(); }
+        onAccepted: function(text) {
+            if (text.trim().length > 0)
+                window.activePane.selectPattern(text.trim());
+        }
+    }
     SeabunnyDialog {
-        id: conflictModal
-        title: resolvingMerge ? "File Already Exists" : "File Conflict"
-        dialogWidth: canMerge || resolvingMerge ? Math.min(560, window.width - 32) : 420
+        id: passwordModal
+        dialogWidth: 400
+        property var request: ({})
+        title: request.kind === "luks" ? qsTr("Unlock Drive") : (request.kind === "compress" ? qsTr("Encrypted Archive") : (request.kind === "smb" ? qsTr("Connect to SMB Share") : qsTr("Password Required")))
 
-        property var conflicts: []
-        property var droppedPaths: []
-        property string destDir: ""
-        property bool isDrop: false
-        property bool asCopy: false
-        readonly property bool canMerge: conflicts.some(function(item) { return !!item.can_merge; })
-        property bool resolvingMerge: false
-        property var mergeConflicts: []
-        property int mergeIndex: 0
-        property var mergeChoices: ({})
-        property string mergeError: ""
-        onClosed: if (!isDrop) engine.cancel_pending_paste()
-
-        function showForClipboard(confList, dest) {
-            resolvingMerge = false;
-            mergeError = "";
-            conflicts = confList;
-            destDir = dest;
-            isDrop = false;
+        function openFor(req) {
+            request = req;
+            pwField.text = "";
+            pwRepeat.text = "";
+            rememberBox.checked = false;
             open();
         }
-
-        function showForDrop(confList, paths, dest, copy) {
-            resolvingMerge = false;
-            mergeError = "";
-            conflicts = confList;
-            droppedPaths = paths;
-            destDir = dest;
-            isDrop = true;
-            asCopy = copy;
-            open();
-        }
-
-        function applyResolution(res) {
-            if (res === "merge") {
-                var scan = JSON.parse(isDrop ? engine.check_merge_conflicts(JSON.stringify(droppedPaths), destDir)
-                                            : engine.check_clipboard_merge_conflicts(destDir));
-                if (scan.error) { mergeError = scan.error; return; }
-                mergeConflicts = scan.conflicts || [];
-                mergeChoices = ({});
-                mergeIndex = 0;
-                applyToAllConflicts.checked = false;
-                if (mergeConflicts.length) {
-                    resolvingMerge = true;
-                    conflicts = [mergeConflicts[0]];
-                    return;
-                }
-                res = JSON.stringify({mode: "merge", collisions: {}});
-            }
-            if (isDrop) {
-                engine.drop_items_resolved(JSON.stringify(droppedPaths), destDir, asCopy, res);
-            } else {
-                engine.paste_items_resolved(destDir, res);
-            }
+        // Focus only works once the popup is really shown.
+        onOpened: pwField.forceActiveFocus()
+        // A new archive's password is typed twice: a typo would lock the
+        // files away for good.
+        readonly property bool needsRepeat: request.kind === "compress"
+        readonly property bool mismatch: needsRepeat && pwRepeat.text.length > 0 && pwRepeat.text !== pwField.text
+        readonly property bool canAccept: pwField.text.length > 0 && (!needsRepeat || pwRepeat.text === pwField.text)
+        function accept() {
+            var pw = pwField.text;
+            if (!canAccept)
+                return;
+            var r = request;
             close();
+            if (r.kind === "compress")
+                core.compress(JSON.stringify(r.paths), r.format, pw);
+            else if (r.kind === "archive")
+                core.extract(r.archive, r.into_subfolder, pw);
+            else if (r.kind === "luks")
+                core.unlock_drive(r.device, pw, rememberBox.checked);
+            else if (r.kind === "smb")
+                core.connect_smb(r.id, pw, rememberBox.checked);
         }
 
-        function chooseMergeFile(choice) {
-            var end = applyToAllConflicts.checked ? mergeConflicts.length : mergeIndex + 1;
-            for (var index = mergeIndex; index < end; index++) mergeChoices[mergeConflicts[index].src_path] = choice;
-            mergeIndex = end;
-            if (mergeIndex < mergeConflicts.length) conflicts = [mergeConflicts[mergeIndex]];
-            else applyResolution(JSON.stringify({mode: "merge", collisions: mergeChoices}));
+        function promptText() {
+            var r = request;
+            if (r.error)
+                return qsTr("Wrong password, try again.");
+            if (r.kind === "luks")
+                return qsTr("Enter the passphrase for %1").arg(r.device || "");
+            if (r.kind === "smb") {
+                var user = r.username ? r.username + "@" : "";
+                return qsTr("Enter the password for %1").arg(user + (r.server || ""));
+            }
+            if (r.kind === "compress")
+                return qsTr("Set a password to protect the archive");
+            return qsTr("“%1” is encrypted").arg((r.archive || "").split("/").pop());
         }
 
         Text {
             Layout.fillWidth: true
-            text: conflictModal.resolvingMerge
-                ? ("Conflict " + (conflictModal.mergeIndex + 1) + " of " + conflictModal.mergeConflicts.length + ". Choose which copy to keep.")
-                : conflictModal.conflicts.length === 1
-                ? ("\u201c" + conflictModal.conflicts[0].name + "\u201d already exists.")
-                : (conflictModal.conflicts.length + " items already exist in this destination.")
+            wrapMode: Text.Wrap
+            color: passwordModal.request.error ? theme.danger : theme.textMuted
+            font.pixelSize: theme.fs(12)
+            text: passwordModal.promptText()
+        }
+        SeabunnyTextField {
+            id: pwField
+            Layout.fillWidth: true
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Password")
+            color: theme.textMain
+            onAccepted: passwordModal.needsRepeat ? pwRepeat.forceActiveFocus() : passwordModal.accept()
+        }
+        SeabunnyTextField {
+            id: pwRepeat
+            visible: passwordModal.needsRepeat
+            Layout.fillWidth: true
+            echoMode: TextInput.Password
+            placeholderText: qsTr("Repeat password")
+            color: theme.textMain
+            onAccepted: passwordModal.accept()
+        }
+        Text {
+            visible: passwordModal.mismatch
+            text: qsTr("The passwords don't match")
+            color: theme.danger
+            font.pixelSize: theme.fs(11)
+        }
+        SeabunnyCheckBox {
+            id: rememberBox
+            visible: passwordModal.request.kind === "luks" || passwordModal.request.kind === "smb"
+            text: qsTr("Remember in the keyring")
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            SeabunnyButton { text: qsTr("Cancel"); variant: "text"; onClicked: passwordModal.close() }
+            SeabunnyButton { text: passwordModal.request.kind === "compress" ? qsTr("Create") : (passwordModal.request.kind === "smb" ? qsTr("Connect") : qsTr("Unlock")); variant: "filled"; enabled: passwordModal.canAccept; onClicked: passwordModal.accept() }
+        }
+    }
+    SeabunnyDialog {
+        id: smbDialog
+        dialogWidth: 460
+        property string editingId: ""
+        title: editingId.length > 0 ? qsTr("Edit SMB Share") : qsTr("Add SMB Share")
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
             color: theme.textMuted
-            font.pixelSize: 12
+            font.pixelSize: theme.fs(12)
+            text: qsTr("Connect to a Windows, Samba or NAS share with your username and password.")
+        }
+        Text { text: qsTr("Display name"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+        SeabunnyTextField { id: smbNameField; Layout.fillWidth: true; color: theme.textMain; placeholderText: qsTr("Studio NAS") }
+        Text { text: qsTr("Server"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+        SeabunnyTextField { id: smbServerField; Layout.fillWidth: true; color: theme.textMain; placeholderText: "192.168.1.20" }
+        Text { text: qsTr("Share name"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+        SeabunnyTextField { id: smbShareField; Layout.fillWidth: true; color: theme.textMain; placeholderText: "media" }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Text { text: qsTr("Username (optional)"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+                SeabunnyTextField { id: smbUserField; Layout.fillWidth: true; color: theme.textMain; placeholderText: "alice" }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Text { text: qsTr("Domain (optional)"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+                SeabunnyTextField { id: smbDomainField; Layout.fillWidth: true; color: theme.textMain; placeholderText: "WORKGROUP" }
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            SeabunnyButton { text: qsTr("Cancel"); variant: "text"; onClicked: smbDialog.close() }
+            SeabunnyButton {
+                text: smbDialog.editingId.length > 0 ? qsTr("Save") : qsTr("Add")
+                variant: "filled"
+                enabled: smbServerField.text.trim().length > 0 && smbShareField.text.trim().length > 0
+                onClicked: {
+                    var id = core.save_smb_profile(smbDialog.editingId, smbNameField.text, smbServerField.text, smbShareField.text, smbUserField.text, smbDomainField.text);
+                    if (id.length === 0) {
+                        window.toast("error", qsTr("A server and share are required"));
+                        return;
+                    }
+                    smbDialog.editingId = id;
+                    smbDialog.close();
+                    window.toast("info", qsTr("SMB share saved"));
+                }
+            }
+        }
+    }
+    SeabunnyDialog {
+        id: confirmDialog
+        dialogWidth: 420
+        property string message: ""
+        property string actionText: qsTr("OK")
+        property var onConfirm: null
+        // Requests that arrive while one is open wait their turn instead of
+        // silently replacing it (its button would then do something else).
+        property var queue: []
+        function ask(t, msg, action, fn) {
+            if (visible) {
+                queue = queue.concat([[t, msg, action, fn]]);
+                return;
+            }
+            title = t;
+            message = msg;
+            actionText = action;
+            onConfirm = fn;
+            open();
+        }
+        onClosed: {
+            if (queue.length > 0) {
+                var next = queue[0];
+                queue = queue.slice(1);
+                Qt.callLater(function() { confirmDialog.ask(next[0], next[1], next[2], next[3]); });
+            }
+        }
+        Text {
+            Layout.fillWidth: true
+            text: confirmDialog.message
+            color: theme.textMuted
+            font.pixelSize: theme.fs(12)
             wrapMode: Text.Wrap
         }
-
-        Rectangle {
-            visible: conflictModal.conflicts.length > 0
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
-            radius: theme.radiusM
-            color: theme.surfaceContainer
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 10
-
-                SeabunnyIcon {
-                    name: (conflictModal.conflicts[0] && conflictModal.conflicts[0].is_dir) ? "folder" : "file"
-                    size: 20
-                    color: theme.textMuted
+            Item { Layout.fillWidth: true }
+            SeabunnyButton { text: qsTr("Cancel"); variant: "text"; onClicked: confirmDialog.close() }
+            SeabunnyButton {
+                text: confirmDialog.actionText
+                variant: "danger"
+                onClicked: {
+                    var fn = confirmDialog.onConfirm;
+                    confirmDialog.close();
+                    if (fn)
+                        fn();
                 }
+            }
+        }
+    }
+    SeabunnyDialog {
+        id: placeEdit
+        title: qsTr("Edit Sidebar Entry")
+        dialogWidth: 440
+        property var place: ({})
+        function openFor(p) {
+            place = p;
+            nameField.text = p.name;
+            pathField.text = p.path;
+            open();
+        }
+        onOpened: { nameField.forceActiveFocus(); nameField.selectAll(); }
+        Text { text: qsTr("Name"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+        SeabunnyTextField { id: nameField; Layout.fillWidth: true; color: theme.textMain }
+        Text { text: qsTr("Folder"); color: theme.textMuted; font.pixelSize: theme.fs(12) }
+        SeabunnyTextField {
+            id: pathField
+            Layout.fillWidth: true
+            color: theme.textMain
+            font.family: "monospace"
+            Keys.onTabPressed: function(e) { text = core.complete_path(text, true); e.accepted = true; }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+            SeabunnyButton { text: qsTr("Cancel"); variant: "text"; onClicked: placeEdit.close() }
+            SeabunnyButton {
+                text: qsTr("Save")
+                variant: "filled"
+                onClicked: {
+                    core.edit_place(placeEdit.place.id, nameField.text.trim() || placeEdit.place.name, pathField.text.trim());
+                    placeEdit.close();
+                }
+            }
+        }
+    }
+    SeabunnyDialog {
+        id: customizePlaces
+        title: qsTr("Customize Sidebar")
+        dialogWidth: 440
+        property var all: []
+        onOpened: all = JSON.parse(core.all_places_json() || "[]")
+        Connections {
+            target: core
+            function onPlaces_jsonChanged() {
+                if (customizePlaces.visible)
+                    customizePlaces.all = JSON.parse(core.all_places_json() || "[]");
+            }
+        }
+        ListView {
+            id: customizePlacesList
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(380, contentHeight)
+            clip: true
+            model: customizePlaces.all
+            ScrollBar.vertical: ScrollBar {}
+            spacing: 4
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
+            delegate: Rectangle {
+                id: placeRow
+                required property var modelData
+                required property int index
+                width: ListView.view.width
+                height: 40
+                radius: theme.radiusM
+                color: dragHandleArea.containsMouse ? theme.hoverOverlay : "transparent"
 
-                    Text {
-                        text: conflictModal.conflicts[0] ? conflictModal.conflicts[0].name : ""
-                        color: theme.textMain
-                        font.pixelSize: 13
-                        font.bold: true
-                        elide: Text.ElideMiddle
-                        Layout.fillWidth: true
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 10
+                    Item {
+                        width: 20; height: 32
+                        SeabunnyIcon {
+                            anchors.centerIn: parent
+                            name: "dots-six-vertical"
+                            size: 16
+                            color: dragHandleArea.containsMouse ? theme.primary : theme.outline
+                        }
+                        MouseArea {
+                            id: dragHandleArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.SizeVerCursor
+                            property int startY: 0
+                            property int startIdx: -1
+                            onPressed: function(mouse) {
+                                startY = mouse.y;
+                                startIdx = placeRow.index;
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (pressed) {
+                                    var pt = mapToItem(customizePlacesList.contentItem, mouse.x, mouse.y);
+                                    var targetIdx = Math.max(0, Math.min(customizePlaces.all.length - 1, Math.floor(pt.y / 44)));
+                                    if (targetIdx !== placeRow.index) {
+                                        core.move_place(placeRow.modelData.id, targetIdx);
+                                    }
+                                }
+                            }
+                        }
                     }
+
+                    SeabunnyIcon {
+                        name: placeRow.modelData.icon || "folder"
+                        size: 16
+                        color: placeRow.modelData.hidden ? theme.outline : theme.primary
+                    }
+
                     Text {
-                        text: conflictModal.conflicts[0] ? (conflictModal.resolvingMerge
-                            ? "Incoming: " + conflictModal.conflicts[0].src_size + " · Existing: " + conflictModal.conflicts[0].dest_size
-                            : "Destination size: " + conflictModal.conflicts[0].dest_size) : ""
-                        color: theme.outline
-                        font.pixelSize: 11
+                        text: placeRow.modelData.name || ""
+                        color: placeRow.modelData.hidden ? theme.textMuted : theme.textMain
+                        font.pixelSize: theme.fs(13)
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        opacity: placeRow.modelData.hidden ? 0.55 : 1.0
+                    }
+                    SeabunnyButton {
+                        icon: placeRow.modelData.hidden ? "eye-slash" : "eye"
+                        variant: "text"
+                        Accessible.name: placeRow.modelData.hidden ? qsTr("Show in sidebar") : qsTr("Hide from sidebar")
+                        onClicked: core.set_place_hidden(placeRow.modelData.id, !placeRow.modelData.hidden)
+                    }
+                    SeabunnyButton {
+                        icon: "trash"
+                        variant: "text"
+                        enabled: placeRow.modelData.kind === "bookmark" || (placeRow.modelData.id && placeRow.modelData.id.indexOf("bookmark:") === 0)
+                        Accessible.name: qsTr("Remove bookmark")
+                        onClicked: {
+                            if (placeRow.modelData.path)
+                                core.remove_bookmark(placeRow.modelData.path);
+                            else
+                                core.set_place_hidden(placeRow.modelData.id, true);
+                        }
                     }
                 }
             }
         }
-
-        Text {
-            visible: conflictModal.canMerge
-            text: "Merge combines matching folders. You can choose what to keep for any files with the same name."
-            color: theme.textMuted
-            font.pixelSize: 12
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.separator }
         SeabunnySwitch {
-            id: applyToAllConflicts
-            objectName: "applyToAllConflictsSwitch"
-            visible: conflictModal.resolvingMerge
-            label: "Apply to all remaining conflicts"
+            label: qsTr("Hide Trash when empty (shows when dragging)")
+            checked: theme.hideTrashWhenEmpty
+            onToggled: function(c) { theme.hideTrashWhenEmpty = c; }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            SeabunnyButton {
+                text: qsTr("Add Place…")
+                icon: "plus"
+                variant: "tonal"
+                onClicked: addPlacePrompt.open()
+            }
+            SeabunnyButton {
+                text: qsTr("Reset")
+                variant: "text"
+                onClicked: core.reset_places()
+            }
+            Item { Layout.fillWidth: true }
+            SeabunnyButton {
+                text: qsTr("Done")
+                variant: "filled"
+                onClicked: customizePlaces.close()
+            }
+        }
+    }
+
+    SeabunnyTextPrompt {
+        id: addPlacePrompt
+        title: qsTr("Add Place to Sidebar")
+        label: qsTr("Enter the full path of the folder to add:")
+        placeholder: "/home/user/my-folder"
+        confirmText: qsTr("Add")
+        selectBasename: false
+        onAccepted: function(pathText) {
+            var p = (pathText || "").trim();
+            if (p.length > 0) {
+                core.add_bookmark(p);
+            }
+        }
+    }
+    SeabunnyDialog {
+        id: customizeContextMenuDialog
+        title: qsTr("Customize Context Menu Actions")
+        dialogWidth: 440
+
+        readonly property var baseActions: [
+            { id: "open", name: qsTr("Open"), icon: "arrow-square-out", shortcut: "Enter" },
+            { id: "new_tab", name: qsTr("Open in New Tab"), icon: "tabs", shortcut: "" },
+            { id: "open_with", name: qsTr("Open With"), icon: "app-window", shortcut: "" },
+            { id: "open_containing", name: qsTr("Open Containing Folder"), icon: "folder-open", shortcut: "" },
+            { id: "quick_look", name: qsTr("Quick Look"), icon: "eye", shortcut: "Space" },
+            { id: "terminal", name: qsTr("Open in Terminal"), icon: "terminal", shortcut: "" },
+            { id: "cut", name: qsTr("Cut"), icon: "scissors", shortcut: "Ctrl+X" },
+            { id: "copy", name: qsTr("Copy"), icon: "copy", shortcut: "Ctrl+C" },
+            { id: "copy_path", name: qsTr("Copy Path"), icon: "copy-simple", shortcut: "Ctrl+Shift+C" },
+            { id: "paste", name: qsTr("Paste"), icon: "clipboard", shortcut: "Ctrl+V" },
+            { id: "rename", name: qsTr("Rename"), icon: "pencil-simple", shortcut: "F2" },
+            { id: "duplicate", name: qsTr("Duplicate"), icon: "copy-simple", shortcut: "" },
+            { id: "make_link", name: qsTr("Make Link"), icon: "link", shortcut: "" },
+            { id: "share", name: qsTr("Share…"), icon: "share-network", shortcut: "" },
+            { id: "compress", name: qsTr("Compress"), icon: "file-archive", shortcut: "" },
+            { id: "extract", name: qsTr("Extract"), icon: "archive", shortcut: "" },
+            { id: "browse_archive", name: qsTr("Browse Archive"), icon: "folder-open", shortcut: "" },
+            { id: "star", name: qsTr("Star / Unstar"), icon: "star", shortcut: "" },
+            { id: "pin", name: qsTr("Add / Remove from Sidebar"), icon: "push-pin", shortcut: "Ctrl+D" },
+            { id: "scripts", name: qsTr("Scripts"), icon: "scroll", shortcut: "" },
+            { id: "admin", name: qsTr("Open as Administrator"), icon: "shield-check", shortcut: "" },
+            { id: "delete", name: qsTr("Move to Trash"), icon: "trash", shortcut: "Del" },
+            { id: "permanent_delete", name: qsTr("Delete Permanently"), icon: "x-circle", shortcut: "Shift+Del" },
+            { id: "properties", name: qsTr("Properties"), icon: "info", shortcut: "Alt+Enter" },
+            { id: "new", name: qsTr("New…"), icon: "plus-circle", shortcut: "" },
+            { id: "select_all", name: qsTr("Select All"), icon: "selection-all", shortcut: "Ctrl+A" },
+            { id: "select_pattern", name: qsTr("Select by Pattern…"), icon: "selection", shortcut: "Ctrl+S" }
+        ]
+
+        property var orderedActions: []
+
+        function refreshActions() {
+            var savedOrder = [];
+            try {
+                var raw = core.get_setting("contextMenuOrder");
+                if (raw && raw.length > 0) savedOrder = JSON.parse(raw);
+            } catch (e) {}
+
+            var list = baseActions.slice();
+            if (savedOrder.length > 0) {
+                list.sort(function(a, b) {
+                    var ia = savedOrder.indexOf(a.id);
+                    var ib = savedOrder.indexOf(b.id);
+                    if (ia === -1 && ib === -1) return 0;
+                    if (ia === -1) return 1;
+                    if (ib === -1) return -1;
+                    return ia - ib;
+                });
+            }
+            orderedActions = list;
         }
 
-        Text {
-            visible: text.length > 0
-            text: conflictModal.mergeError
-            color: theme.danger
-            font.pixelSize: 12
-            wrapMode: Text.WordWrap
+        onOpened: refreshActions()
+
+        function moveAction(fromIdx, toIdx) {
+            if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= orderedActions.length || toIdx >= orderedActions.length)
+                return;
+            var list = orderedActions.slice();
+            var item = list.splice(fromIdx, 1)[0];
+            list.splice(toIdx, 0, item);
+            orderedActions = list;
+            var orderIds = list.map(function(x) { return x.id; });
+            core.set_setting("contextMenuOrder", JSON.stringify(orderIds));
+        }
+
+        ListView {
+            id: customizeContextMenuList
             Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(380, contentHeight)
+            clip: true
+            model: customizeContextMenuDialog.orderedActions
+            ScrollBar.vertical: ScrollBar {}
+            spacing: 4
+
+            delegate: Rectangle {
+                id: actionRow
+                required property var modelData
+                required property int index
+                width: ListView.view.width
+                height: 40
+                radius: theme.radiusM
+                color: actionDragHandle.containsMouse ? theme.hoverOverlay : "transparent"
+
+                readonly property bool isHidden: !!(theme.disabledMenuItems && theme.disabledMenuItems[modelData.id])
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 10
+                    Item {
+                        width: 20; height: 32
+                        SeabunnyIcon {
+                            anchors.centerIn: parent
+                            name: "dots-six-vertical"
+                            size: 16
+                            color: actionDragHandle.containsMouse ? theme.primary : theme.outline
+                        }
+                        MouseArea {
+                            id: actionDragHandle
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.SizeVerCursor
+                            onPositionChanged: function(mouse) {
+                                if (pressed) {
+                                    var pt = mapToItem(customizeContextMenuList.contentItem, mouse.x, mouse.y);
+                                    var targetIdx = Math.max(0, Math.min(customizeContextMenuDialog.orderedActions.length - 1, Math.floor(pt.y / 44)));
+                                    if (targetIdx !== actionRow.index) {
+                                        customizeContextMenuDialog.moveAction(actionRow.index, targetIdx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SeabunnyIcon {
+                        name: actionRow.modelData.icon || "circle"
+                        size: 16
+                        color: actionRow.isHidden ? theme.outline : theme.primary
+                    }
+
+                    Text {
+                        text: actionRow.modelData.name || ""
+                        color: actionRow.isHidden ? theme.textMuted : theme.textMain
+                        font.pixelSize: theme.fs(13)
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        opacity: actionRow.isHidden ? 0.55 : 1.0
+                    }
+
+                    Text {
+                        visible: actionRow.modelData.shortcut && actionRow.modelData.shortcut.length > 0
+                        text: actionRow.modelData.shortcut || ""
+                        color: theme.textMuted
+                        font.pixelSize: theme.fs(11)
+                    }
+                    SeabunnyButton {
+                        icon: actionRow.isHidden ? "eye-slash" : "eye"
+                        variant: "text"
+                        Accessible.name: actionRow.isHidden ? qsTr("Show in context menu") : qsTr("Hide from context menu")
+                        onClicked: {
+                            var map = Object.assign({}, theme.disabledMenuItems || {});
+                            if (actionRow.isHidden) {
+                                delete map[actionRow.modelData.id];
+                            } else {
+                                map[actionRow.modelData.id] = true;
+                            }
+                            theme.disabledMenuItems = map;
+                        }
+                    }
+                }
+            }
         }
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
-
             SeabunnyButton {
-                text: "Cancel"
+                text: qsTr("Reset to Default")
                 variant: "text"
-                onClicked: conflictModal.close()
+                onClicked: {
+                    theme.disabledMenuItems = {};
+                    theme.contextMenuMode = "full";
+                    core.set_setting("contextMenuOrder", "[]");
+                    customizeContextMenuDialog.refreshActions();
+                }
             }
             Item { Layout.fillWidth: true }
             SeabunnyButton {
-                text: "Skip"
-                visible: !conflictModal.resolvingMerge
-                variant: "tonal"
-                onClicked: conflictModal.applyResolution("skip")
-            }
-            SeabunnyButton {
-                objectName: "keepBothMergeButton"
-                text: "Keep Both"
-                variant: "tonal"
-                onClicked: conflictModal.resolvingMerge ? conflictModal.chooseMergeFile("keep_both") : conflictModal.applyResolution("rename")
-            }
-            SeabunnyButton {
-                objectName: "keepExistingMergeButton"
-                text: "Keep Existing"
-                visible: conflictModal.resolvingMerge
-                variant: "tonal"
-                onClicked: conflictModal.chooseMergeFile("keep_existing")
-            }
-            SeabunnyButton {
-                objectName: "replaceExistingMergeButton"
-                text: conflictModal.resolvingMerge ? "Replace Existing" : "Replace"
+                text: qsTr("Done")
                 variant: "filled"
-                onClicked: conflictModal.resolvingMerge ? conflictModal.chooseMergeFile("replace") : conflictModal.applyResolution("overwrite")
-            }
-            SeabunnyButton {
-                objectName: "mergeFoldersButton"
-                visible: conflictModal.canMerge
-                text: "Merge"
-                variant: "filled"
-                onClicked: conflictModal.applyResolution("merge")
+                onClicked: customizeContextMenuDialog.close()
             }
         }
     }

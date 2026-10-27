@@ -10,7 +10,7 @@ SeabunnyDialog {
     property string label: ""
     property string initialText: ""
     property string placeholder: ""
-    property string confirmText: "Save"
+    property string confirmText: qsTr("Save")
     property bool selectBasename: false
 
     signal accepted(string text)
@@ -31,24 +31,20 @@ SeabunnyDialog {
         field.forceActiveFocus();
         if (prompt.selectBasename) {
             var slash = prompt.initialText.lastIndexOf("/");
-            var start = slash + 1;
-            var dot = prompt.initialText.lastIndexOf(".");
-            field.select(start, dot > start ? dot : field.text.length);
+            if (slash >= 0)
+                field.select(slash + 1, field.text.length);
+            else
+                field.selectAll();
         } else {
             field.selectAll();
         }
-    }
-
-    onAboutToHide: {
-        if (field.activeFocus && prompt.parent)
-            prompt.parent.forceActiveFocus(Qt.PopupFocusReason);
     }
 
     Text {
         visible: prompt.label.length > 0
         text: prompt.label
         color: theme.textMuted
-        font.pixelSize: 12
+        font.pixelSize: theme.fs(12)
         elide: Text.ElideRight
         Layout.fillWidth: true
     }
@@ -59,7 +55,7 @@ SeabunnyDialog {
         placeholderText: prompt.placeholder
         color: theme.textMain
         placeholderTextColor: theme.textMuted
-        font.pixelSize: 14
+        font.pixelSize: theme.fs(14)
         selectByMouse: true
         leftPadding: 12
         rightPadding: 12
@@ -72,12 +68,12 @@ SeabunnyDialog {
             border.width: field.activeFocus ? 2 : 1
             border.color: field.activeFocus ? theme.primary : theme.borderSubtle
 
-            Behavior on border.color { enabled: !theme.reducedMotion; ColorAnimation { duration: theme.motionDuration(120)} }
+            Behavior on border.color { enabled: theme.animate; ColorAnimation { duration: 120 } }
         }
 
         onAccepted: prompt.accept()
 
-        Keys.onEscapePressed: function(event) {
+        Keys.onEscapePressed: {
             prompt.cancel();
             event.accepted = true;
         }
@@ -90,7 +86,7 @@ SeabunnyDialog {
         Item { Layout.fillWidth: true }
 
         SeabunnyButton {
-            text: "Cancel"
+            text: qsTr("Cancel")
             variant: "text"
             onClicked: prompt.cancel()
         }

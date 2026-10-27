@@ -43,6 +43,7 @@ public:
     PortalRequest(const QString &method, const QString &title, const QVariantMap &options, QObject *parent = nullptr);
     QVariantMap config() const { return m_config; }
     Q_INVOKABLE bool matches(const QString &path, int filter) const;
+    Q_INVOKABLE QString filterRules(int index) const;
     Q_INVOKABLE QString saveName(const QString &name, int filter) const;
     Q_INVOKABLE QVariantMap accept(const QString &folder, const QStringList &selected,
                                   const QString &name, int filter, const QVariantMap &choices, bool overwrite);
