@@ -6,6 +6,8 @@
 #include <QJsonObject>
 #include <QMimeDatabase>
 #include <QtTest>
+#undef signals
+#include <gio/gdesktopappinfo.h>
 
 class OpenWithTests : public QObject {
     Q_OBJECT
@@ -41,6 +43,8 @@ private slots:
                 + (name == "hidden" ? "Hidden=true\n" : "")).toUtf8());
         }
         write(directory + "mimeinfo.cache", "[MIME Cache]\ntext/plain=one.desktop;two.desktop;\nimage/png=two.desktop;\n");
+        write(directory + "org.femgore.Seabunny.desktop", ("[Desktop Entry]\nType=Application\nName=Seabunny\nExec=\""
+            + recorder + "\" seabunny %F\nMimeType=text/plain;application/pdf;\n").toUtf8());
     }
     void listsInstalledApplicationsAndTypes() {
         const auto result = apps({first});
@@ -103,6 +107,41 @@ private slots:
         write(invalid, "not a runnable program\n");
         QVERIFY(QFile::setPermissions(invalid, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         QVERIFY(!seabunny_open_file(invalid).isEmpty());
+    }
+    void exactDefaultLookupAndSelfHandlerNeverLoop() {
+        auto self = g_desktop_app_info_new_from_filename((qEnvironmentVariable("XDG_DATA_HOME")
+            + "/applications/org.femgore.Seabunny.desktop").toUtf8().constData());
+        QVERIFY(self);
+        GError *error = nullptr;
+        QVERIFY(g_app_info_set_as_default_for_type(G_APP_INFO(self), "text/plain", &error));
+        g_object_unref(self);
+        const QByteArray before = read(receipt);
+        QVERIFY(seabunny_open_file(first).contains("Open With"));
+        QCOMPARE(read(receipt), before);
+        QVERIFY(!seabunny_open_with(paths({first}), "org.femgore.Seabunny.desktop", false).isEmpty());
+        const auto available = apps({first})["apps"].toArray();
+        for (const auto &app : available) QVERIFY(app.toObject()["id"].toString() != "org.femgore.Seabunny.desktop");
+        const QString document = root + "/work/content mismatch.pdf";
+        write(document, "plain text inside a file named PDF\n");
+        QCOMPARE(QMimeDatabase().mimeTypeForFile(document).name(), "application/pdf");
+        QCOMPARE(seabunny_open_with(paths({document}), "two.desktop", true), QString());
+        QTRY_VERIFY(read(receipt).size() > before.size());
+        const auto size = read(receipt).size();
+        QCOMPARE(seabunny_open_file(document), QString());
+        QTRY_VERIFY(read(receipt).size() > size);
+        QVERIFY(!read(receipt).contains("seabunny\n"));
+        QCOMPARE(seabunny_open_with(paths({first}), "two.desktop", true), QString());
+        QCOMPARE(seabunny_open_file(first), QString());
+    }
+    void executableDesktopLaunchersRunTheirApplication() {
+        const QString launcher = root + "/work/Viewer ö.desktop";
+        write(launcher, ("[Desktop Entry]\nType=Application\nName=Viewer\nExec=\"" + root
+            + "/app recorder\" desktop-launcher\n").toUtf8());
+        QVERIFY(QFile::setPermissions(launcher, QFile::ReadOwner | QFile::WriteOwner));
+        QVERIFY(seabunny_open_file(launcher).contains("Make executable"));
+        QVERIFY(QFile::setPermissions(launcher, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QCOMPARE(seabunny_open_file(launcher), QString());
+        QTRY_VERIFY(read(receipt).contains("desktop-launcher\n"));
     }
 };
 QTEST_GUILESS_MAIN(OpenWithTests)

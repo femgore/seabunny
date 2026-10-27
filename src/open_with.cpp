@@ -51,6 +51,7 @@ QByteArray fileHeader(const QString &path) {
 
 bool isNativeProgram(const QFileInfo &info, const QByteArray &header) {
     return info.isFile() && (info.suffix().compare("appimage", Qt::CaseInsensitive) == 0
+        || info.suffix().compare("desktop", Qt::CaseInsensitive) == 0
         || header.startsWith(QByteArray("\x7f" "ELF", 4)) || (header.startsWith("#!") && info.isExecutable()));
 }
 
@@ -61,9 +62,18 @@ bool containsProgram(const QStringList &paths) {
     });
 }
 
-bool selectable(GAppInfo *app) {
+bool isSeabunny(GAppInfo *app) {
+    const QString id = QString::fromUtf8(g_app_info_get_id(app) ? g_app_info_get_id(app) : "");
+    const char *command = g_app_info_get_executable(app);
+    const QString executable = command ? QFileInfo(QString::fromUtf8(command)).fileName() : QString();
+    return id == "org.femgore.Seabunny.desktop" || id.toLower() == "seabunny.desktop"
+        || executable == "seabunny" || executable == "seabunny.fish"
+        || executable == "xdg-desktop-portal-seabunny";
+}
+
+bool selectable(GAppInfo *app, bool foldersOnly = false) {
     const char *id = g_app_info_get_id(app);
-    return id && g_app_info_should_show(app)
+    return id && (foldersOnly || !isSeabunny(app)) && g_app_info_should_show(app)
         && (g_app_info_supports_files(app) || g_app_info_supports_uris(app));
 }
 }
@@ -72,6 +82,7 @@ QString seabunny_open_with_apps(const QString &json) {
     const QStringList paths = pathsFromJson(json);
     if (paths.isEmpty()) return "{\"error\":\"The selected items are no longer available.\"}";
     const QString type = commonType(paths);
+    const bool foldersOnly = std::all_of(paths.begin(), paths.end(), [](const QString &path) { return QFileInfo(path).isDir(); });
     const QByteArray mime = type.toUtf8();
     QSet<QString> recommended;
     GList *related = type.isEmpty() ? nullptr : g_app_info_get_all_for_type(mime.constData());
@@ -88,7 +99,7 @@ QString seabunny_open_with_apps(const QString &json) {
     GList *all = g_app_info_get_all();
     for (GList *item = all; item; item = item->next) {
         auto app = G_APP_INFO(item->data);
-        if (!selectable(app)) continue;
+        if (!selectable(app, foldersOnly)) continue;
         const QString id = QString::fromUtf8(g_app_info_get_id(app));
         QString icon = "application-x-executable";
         GIcon *gicon = g_app_info_get_icon(app);
@@ -129,7 +140,13 @@ QString seabunny_open_with(const QString &json, const QString &desktopId, bool m
     auto desktop = g_desktop_app_info_new(desktopId.toUtf8().constData());
     if (!desktop) return "This application is no longer installed.";
     GAppInfo *app = G_APP_INFO(desktop);
-    if (!selectable(app)) { g_object_unref(app); return "This application cannot open files."; }
+    const bool foldersOnly = std::all_of(paths.begin(), paths.end(), [](const QString &path) { return QFileInfo(path).isDir(); });
+    if (!selectable(app, foldersOnly)) {
+        const QString message = isSeabunny(app) ? "Choose an application other than Seabunny to open this file."
+                                              : "This application cannot open files.";
+        g_object_unref(app);
+        return message;
+    }
     GList *files = nullptr;
     for (const auto &path : paths) files = g_list_append(files, g_file_new_for_path(QFile::encodeName(path).constData()));
     GError *error = nullptr;
@@ -150,6 +167,14 @@ QString seabunny_open_file(const QString &path) {
     const bool program = isNativeProgram(info, header);
     if (program) {
         if (!info.isExecutable()) return "This program is not executable. Enable Make executable in Properties first.";
+        if (info.suffix().compare("desktop", Qt::CaseInsensitive) == 0) {
+            auto app = g_desktop_app_info_new_from_filename(QFile::encodeName(info.absoluteFilePath()).constData());
+            if (!app) return "This desktop launcher is invalid or its application is unavailable.";
+            GError *error = nullptr;
+            const bool launched = g_app_info_launch(G_APP_INFO(app), nullptr, nullptr, &error);
+            g_object_unref(app);
+            return launched ? QString() : errorText(error, "Could not launch this application.");
+        }
         if (!header.startsWith(QByteArray("\x7f" "ELF", 4)) && !header.startsWith("#!"))
             return "This file is not a valid native program or script.";
         QProcess process;
@@ -159,8 +184,19 @@ QString seabunny_open_file(const QString &path) {
         return {};
     }
     GError *error = nullptr;
-    const QByteArray uri = QUrl::fromLocalFile(info.absoluteFilePath()).toEncoded();
-    if (!g_app_info_launch_default_for_uri(uri.constData(), nullptr, &error))
-        return errorText(error, "No application is available for this file type. Try Open With…");
-    return {};
+    // Use exactly the MIME lookup used by the picker when it saves the default.
+    // URI-based launching can sniff a different type and pick another handler.
+    const QByteArray type = commonType({path}).toUtf8();
+    GAppInfo *app = g_app_info_get_default_for_type(type.constData(), false);
+    if (!app) return "No default application is available for this file type. Choose one with Open With…";
+    if (isSeabunny(app)) {
+        g_object_unref(app);
+        return "Seabunny is registered as this file's handler. Choose another default with Open With…";
+    }
+    GFile *file = g_file_new_for_path(QFile::encodeName(info.absoluteFilePath()).constData());
+    GList files{file, nullptr, nullptr};
+    const bool launched = g_app_info_launch(app, &files, nullptr, &error);
+    g_object_unref(file);
+    g_object_unref(app);
+    return launched ? QString() : errorText(error, "Could not open this application.");
 }

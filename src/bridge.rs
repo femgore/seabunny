@@ -186,6 +186,12 @@ pub mod qobject {
         fn check_clipboard_conflicts(self: &SeabunnyEngine, dest_dir: &QString) -> QString;
 
         #[qinvokable]
+        fn check_merge_conflicts(self: &SeabunnyEngine, paths_json: &QString, dest_dir: &QString) -> QString;
+
+        #[qinvokable]
+        fn check_clipboard_merge_conflicts(self: &SeabunnyEngine, dest_dir: &QString) -> QString;
+
+        #[qinvokable]
         fn paste_items_resolved(self: Pin<&mut SeabunnyEngine>, dest_dir: &QString, resolution: &QString);
 
         #[qinvokable]
@@ -431,6 +437,7 @@ pub struct ConflictItem {
     pub src_size: String,
     pub dest_size: String,
     pub is_dir: bool,
+    pub can_merge: bool,
 }
 
 #[derive(Serialize)]
@@ -595,6 +602,8 @@ enum UndoAction {
     /// Pairs are (source, created_copy).
     Copy { pairs: Vec<(String, String)> },
     Trash { items: Vec<TrashItem> },
+    Merge { actions: Vec<UndoAction> },
+    RemovedDirectory { path: String, mode: u32 },
 }
 
 static UNDO_STACK: Mutex<Option<Vec<UndoAction>>> = Mutex::new(None);
@@ -705,7 +714,9 @@ fn trash_paths() -> (PathBuf, PathBuf) {
 }
 
 fn unique_trash_name(files_dir: &Path, name: &str) -> String {
-    if !files_dir.join(name).exists() {
+    let available = |name: &str| !entry_exists(&files_dir.join(name))
+        && !entry_exists(&files_dir.parent().unwrap().join("info").join(format!("{name}.trashinfo")));
+    if available(name) {
         return name.to_string();
     }
     let p = Path::new(name);
@@ -718,7 +729,7 @@ fn unique_trash_name(files_dir: &Path, name: &str) -> String {
     let mut i = 1;
     loop {
         let candidate = format!("{}.{}{}", stem, i, ext);
-        if !files_dir.join(&candidate).exists() {
+        if available(&candidate) {
             return candidate;
         }
         i += 1;
@@ -729,7 +740,7 @@ fn unique_trash_name(files_dir: &Path, name: &str) -> String {
 /// everything needed to reverse the operation.
 fn trash_into_home_trash(path: &Path) -> Option<TrashItem> {
     let name = path.file_name().and_then(|n| n.to_str())?.to_string();
-    if !path.exists() {
+    if !entry_exists(path) {
         return None;
     }
 
@@ -741,7 +752,10 @@ fn trash_into_home_trash(path: &Path) -> Option<TrashItem> {
     let trashed = files_dir.join(&trash_name);
     let info_path = info_dir.join(format!("{}.trashinfo", trash_name));
 
-    let abs = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // Resolve the parent, never the final link: restoring a trashed symlink
+    // must put the link back, rather than overwrite its target.
+    let abs = path.parent().and_then(|parent| fs::canonicalize(parent).ok())
+        .map(|parent| parent.join(path.file_name().unwrap())).unwrap_or_else(|| path.to_path_buf());
     let abs_str = abs.to_string_lossy().to_string();
     let info_content = format!(
         "[Trash Info]\nPath={}\nDeletionDate={}\n",
@@ -753,20 +767,9 @@ fn trash_into_home_trash(path: &Path) -> Option<TrashItem> {
     let mut moved = fs::rename(path, &trashed).is_ok();
     if !moved {
         // Cross-device fallback: copy then delete the original.
-        let copied = if abs.is_dir() {
-            std::process::Command::new("cp")
-                .arg("-r")
-                .arg(&abs)
-                .arg(&trashed)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        } else {
-            fs::copy(&abs, &trashed).is_ok()
-        };
+        let copied = copy_merge_entry(&abs, &trashed);
         if copied {
-            let _ = if abs.is_dir() { fs::remove_dir_all(&abs) } else { fs::remove_file(&abs) };
-            moved = true;
+            moved = remove_path(&abs);
         }
     }
 
@@ -1187,6 +1190,137 @@ fn copy_recursive(src: &Path, dst: &Path) -> bool {
     }
 }
 
+fn real_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+}
+
+fn entry_exists(path: &Path) -> bool { fs::symlink_metadata(path).is_ok() }
+
+fn copy_merge_entry(src: &Path, dst: &Path) -> bool {
+    if fs::symlink_metadata(src).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        fs::read_link(src).and_then(|target| std::os::unix::fs::symlink(target, dst)).is_ok()
+    } else { copy_recursive(src, dst) }
+}
+
+/// Only real directories on both sides are combined. Other collisions require
+/// an explicit per-item choice, including links and file/directory mismatches.
+fn merge_folders(src: &Path, dst: &Path, cut: bool, choices: &HashMap<String, String>, actions: &mut Vec<UndoAction>) -> Result<(), String> {
+    let source = fs::canonicalize(src).map_err(|e| e.to_string())?;
+    let destination = fs::canonicalize(dst).map_err(|e| e.to_string())?;
+    if !real_directory(src) || !real_directory(dst) || source.starts_with(&destination) || destination.starts_with(&source) {
+        return Err("Cannot merge a folder with itself, its parent, a symbolic link, or one of its subfolders.".into());
+    }
+    merge_folder_contents(src, dst, cut, choices, actions)
+}
+
+fn merge_folder_contents(src: &Path, dst: &Path, cut: bool, choices: &HashMap<String, String>, actions: &mut Vec<UndoAction>) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(src).map_err(|e| e.to_string())?.permissions().mode();
+    let entries = fs::read_dir(src).map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let mut errors = Vec::new();
+    for entry in entries {
+        let from = entry.path();
+        let mut to = dst.join(entry.file_name());
+        if real_directory(&from) && real_directory(&to) {
+            if let Err(error) = merge_folder_contents(&from, &to, cut, choices, actions) { errors.push(error); }
+            continue;
+        }
+        if entry_exists(&to) {
+            match resolve_merge_collision(&from, &to, choices, actions) {
+                Ok(Some(target)) => to = target,
+                Ok(None) => continue,
+                Err(error) => { errors.push(error); continue; }
+            }
+        }
+        if let Err(error) = transfer_merge_entry(&from, &to, cut, actions) { errors.push(error); }
+    }
+    if cut && errors.is_empty() {
+        let empty = fs::read_dir(src).map(|mut entries| entries.next().is_none()).unwrap_or(false);
+        if empty { match fs::remove_dir(src) {
+            Ok(()) => actions.push(UndoAction::RemovedDirectory { path: src.to_string_lossy().into_owned(), mode }),
+            Err(error) => errors.push(error.to_string()),
+        } }
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("\n")) }
+}
+
+fn transfer_merge_entry(src: &Path, dst: &Path, cut: bool, actions: &mut Vec<UndoAction>) -> Result<(), String> {
+    let pairs = vec![(src.to_string_lossy().into_owned(), dst.to_string_lossy().into_owned())];
+    if entry_exists(dst) { return Err(format!("Destination changed during merge: {}", dst.display())); }
+    if cut && fs::rename(src, dst).is_ok() {
+        actions.push(UndoAction::Move { pairs });
+        return Ok(());
+    }
+    let copied = copy_merge_entry(src, dst);
+    if copied && cut && remove_path(src) {
+        actions.push(UndoAction::Move { pairs });
+        return Ok(());
+    }
+    if entry_exists(dst) { actions.push(UndoAction::Copy { pairs }); }
+    if copied && !cut { Ok(()) } else { Err(format!("Could not completely transfer {}", src.display())) }
+}
+
+fn resolve_merge_collision(src: &Path, dst: &Path, choices: &HashMap<String, String>, actions: &mut Vec<UndoAction>) -> Result<Option<PathBuf>, String> {
+    if !entry_exists(src) { return Err("The incoming item is no longer available. The existing item was kept.".into()); }
+    match choices.get(&src.to_string_lossy().to_string()).map(String::as_str) {
+        Some("keep_existing") => Ok(None),
+        Some("keep_both") => Ok(Some(get_unique_name(dst.parent().unwrap(), &dst.file_name().unwrap().to_string_lossy()))),
+        Some("replace") => {
+            let item = trash_into_home_trash(dst).ok_or_else(|| format!("Could not safely replace {}. The existing item was kept.", dst.display()))?;
+            actions.push(UndoAction::Trash { items: vec![item] });
+            Ok(Some(dst.to_path_buf()))
+        }
+        _ => Err(format!("A new conflict appeared at {}. Paste again to choose what to keep.", dst.display())),
+    }
+}
+
+fn merge_resolution(value: &str) -> (String, HashMap<String, String>) {
+    if let Ok(plan) = serde_json::from_str::<serde_json::Value>(value) {
+        if plan["mode"] == "merge" {
+            let choices = serde_json::from_value(plan["collisions"].clone()).unwrap_or_default();
+            return ("merge".into(), choices);
+        }
+    }
+    (value.into(), HashMap::new())
+}
+
+fn collect_merge_conflicts(src: &Path, dst: &Path, root: &Path, conflicts: &mut Vec<ConflictItem>) -> Result<(), String> {
+    if real_directory(src) && real_directory(dst) {
+        let source = fs::canonicalize(src).map_err(|e| e.to_string())?;
+        let destination = fs::canonicalize(dst).map_err(|e| e.to_string())?;
+        if source.starts_with(&destination) || destination.starts_with(&source) { return Err("Cannot merge overlapping folders.".into()); }
+        let mut entries = fs::read_dir(src).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries { collect_merge_conflicts(&entry.path(), &dst.join(entry.file_name()), root, conflicts)?; }
+    } else if entry_exists(dst) {
+        let size = |path: &Path| if real_directory(path) { "Folder".into() }
+            else { fs::symlink_metadata(path).map(|m| format_size(m.len())).unwrap_or_else(|_| "Unavailable".into()) };
+        conflicts.push(ConflictItem { name: src.strip_prefix(root).unwrap_or(src).to_string_lossy().into_owned(),
+            src_path: src.to_string_lossy().into_owned(), dest_path: dst.to_string_lossy().into_owned(),
+            src_size: size(src), dest_size: size(dst), is_dir: real_directory(dst), can_merge: false });
+    }
+    Ok(())
+}
+
+fn replay_merge_move(action: &UndoAction, inverse: bool) -> Option<UndoAction> {
+    let UndoAction::Move { pairs } = action else { return None };
+    let moved = pairs.iter().filter(|(from, to)| {
+        let (src, dst) = if inverse { (Path::new(to), Path::new(from)) } else { (Path::new(from), Path::new(to)) };
+        !entry_exists(dst) && (fs::rename(src, dst).is_ok() || (copy_merge_entry(src, dst) && remove_path(src)))
+    }).cloned().collect::<Vec<_>>();
+    if moved.is_empty() { None } else { Some(UndoAction::Move { pairs: moved }) }
+}
+
+fn replay_merge_copy(action: &UndoAction, inverse: bool) -> Option<UndoAction> {
+    let UndoAction::Copy { pairs } = action else { return None };
+    let copied = pairs.iter().filter(|(from, to)| {
+        if inverse { remove_path(Path::new(to)) }
+        else { !entry_exists(Path::new(to)) && copy_merge_entry(Path::new(from), Path::new(to)) }
+    }).cloned().collect::<Vec<_>>();
+    if copied.is_empty() { None } else { Some(UndoAction::Copy { pairs: copied }) }
+}
+
 fn remove_path(path: &Path) -> bool {
     if path.is_dir() {
         fs::remove_dir_all(path).is_ok()
@@ -1251,6 +1385,29 @@ fn trash_via_cli(path: &Path) -> Option<TrashItem> {
 /// Reverses `action` on the filesystem; returns the action that would replay it.
 fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
     match action {
+        UndoAction::Merge { actions } => {
+            let mut undone = actions.iter().rev().filter_map(|action| {
+                match action {
+                    UndoAction::Move { .. } => replay_merge_move(action, true),
+                    UndoAction::Copy { .. } => replay_merge_copy(action, true),
+                    _ => apply_inverse(action),
+                }
+            }).collect::<Vec<_>>();
+            // Recreated source directories stay writable until their children
+            // have returned, then regain their original permissions.
+            use std::os::unix::fs::PermissionsExt;
+            for action in &undone {
+                if let UndoAction::RemovedDirectory { path, mode } = action {
+                    let _ = fs::set_permissions(path, fs::Permissions::from_mode(*mode));
+                }
+            }
+            undone.reverse();
+            if undone.is_empty() { None } else { Some(UndoAction::Merge { actions: undone }) }
+        }
+        UndoAction::RemovedDirectory { path, mode } => {
+            use std::os::unix::fs::DirBuilderExt;
+            fs::DirBuilder::new().mode(*mode | 0o700).create(path).ok().map(|_| action.clone())
+        }
         UndoAction::Rename { dir, old_name, new_name } => {
             let base = Path::new(dir);
             fs::rename(base.join(new_name), base.join(old_name))
@@ -1305,7 +1462,7 @@ fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
                     let _ = fs::create_dir_all(parent);
                 }
                 let mut ok = fs::rename(from, to).is_ok();
-                if !ok && from.exists() && copy_recursive(from, to) {
+                if !ok && entry_exists(from) && copy_merge_entry(from, to) {
                     let _ = remove_path(from);
                     ok = true;
                 }
@@ -1326,6 +1483,17 @@ fn apply_inverse(action: &UndoAction) -> Option<UndoAction> {
 /// Replays `action` on the filesystem; returns the action that would undo it.
 fn apply_action(action: &UndoAction) -> Option<UndoAction> {
     match action {
+        UndoAction::Merge { actions } => {
+            let redone = actions.iter().filter_map(|action| {
+                match action {
+                    UndoAction::Move { .. } => replay_merge_move(action, false),
+                    UndoAction::Copy { .. } => replay_merge_copy(action, false),
+                    _ => apply_action(action),
+                }
+            }).collect::<Vec<_>>();
+            if redone.is_empty() { None } else { Some(UndoAction::Merge { actions: redone }) }
+        }
+        UndoAction::RemovedDirectory { path, .. } => fs::remove_dir(path).ok().map(|_| action.clone()),
         UndoAction::Rename { dir, old_name, new_name } => {
             let base = Path::new(dir);
             fs::rename(base.join(old_name), base.join(new_name))
@@ -1456,7 +1624,7 @@ fn format_modified_time(meta: &fs::Metadata) -> (u64, String) {
 
 fn get_unique_name(dest: &Path, name: &str) -> PathBuf {
     let mut target = dest.join(name);
-    if !target.exists() {
+    if !entry_exists(&target) {
         return target;
     }
     let p = Path::new(name);
@@ -1475,7 +1643,7 @@ fn get_unique_name(dest: &Path, name: &str) -> PathBuf {
     loop {
         let new_name = format!("{} ({}){}", stem, count, ext_str);
         target = dest.join(&new_name);
-        if !target.exists() {
+        if !entry_exists(&target) {
             return target;
         }
         count += 1;
@@ -3022,7 +3190,7 @@ impl qobject::SeabunnyEngine {
             }
             let Some(file_name) = src.file_name() else { continue };
             let target = dest.join(file_name);
-            if target.exists() {
+            if entry_exists(&target) {
                 let name = file_name.to_string_lossy().to_string();
                 let is_dir = target.is_dir();
                 let src_size = src.metadata().map(|m| format_size(m.len())).unwrap_or_else(|_| "-".to_string());
@@ -3034,6 +3202,7 @@ impl qobject::SeabunnyEngine {
                     src_size,
                     dest_size,
                     is_dir,
+                    can_merge: real_directory(&src) && real_directory(&target),
                 });
             }
         }
@@ -3048,6 +3217,25 @@ impl qobject::SeabunnyEngine {
         self.check_paste_conflicts(&QString::from(&paths_json), dest_dir)
     }
 
+    pub fn check_merge_conflicts(&self, paths_json: &QString, dest_dir: &QString) -> QString {
+        let paths = serde_json::from_str::<Vec<String>>(&paths_json.to_string()).unwrap_or_default();
+        let dest = PathBuf::from(dest_dir.to_string());
+        let mut conflicts = Vec::new();
+        for path in paths {
+            let src = PathBuf::from(path);
+            let Some(name) = src.file_name() else { continue };
+            if let Err(error) = collect_merge_conflicts(&src, &dest.join(name), src.parent().unwrap_or(&src), &mut conflicts) {
+                return QString::from(&serde_json::json!({"error": error}).to_string());
+            }
+        }
+        QString::from(&serde_json::json!({"conflicts": conflicts}).to_string())
+    }
+
+    pub fn check_clipboard_merge_conflicts(&self, dest_dir: &QString) -> QString {
+        let paths = CLIPBOARD.lock().unwrap().0.clone();
+        self.check_merge_conflicts(&QString::from(&serde_json::to_string(&paths).unwrap_or_else(|_| "[]".into())), dest_dir)
+    }
+
     pub fn paste_items_resolved(mut self: Pin<&mut Self>, dest_dir: &QString, resolution: &QString) {
         if self.as_mut().reject_archive_write(&dest_dir.to_string()) { return; }
         let dest = PathBuf::from(dest_dir.to_string());
@@ -3056,15 +3244,32 @@ impl qobject::SeabunnyEngine {
             (clip.0.clone(), clip.1)
         };
         if self.as_mut().copy_archive_paths(&files, &dest_dir.to_string()) { return; }
-        let res = resolution.to_string();
+        let (res, merge_choices) = merge_resolution(&resolution.to_string());
 
         let mut move_pairs: Vec<(String, String)> = Vec::new();
         let mut copy_pairs: Vec<(String, String)> = Vec::new();
+        let mut merged_actions = Vec::new();
+        let mut merge_errors = Vec::new();
+        let mut completed_cuts = Vec::new();
 
         for src_str in &files {
             let src = PathBuf::from(src_str);
             let Some(file_name) = src.file_name().and_then(|n| n.to_str()) else { continue };
-            let target = if res == "rename" {
+            let original_target = dest.join(file_name);
+            if res == "merge" && real_directory(&src) && real_directory(&original_target) {
+                match merge_folders(&src, &original_target, is_cut, &merge_choices, &mut merged_actions) {
+                    Ok(()) => { if is_cut && !entry_exists(&src) { completed_cuts.push(src_str.clone()); } }
+                    Err(error) => merge_errors.push(error),
+                }
+                continue;
+            }
+            let target = if res == "merge" && entry_exists(&original_target) {
+                match resolve_merge_collision(&src, &original_target, &merge_choices, &mut merged_actions) {
+                    Ok(Some(target)) => target,
+                    Ok(None) => continue,
+                    Err(error) => { merge_errors.push(error); continue; }
+                }
+            } else if res == "rename" {
                 get_unique_name(&dest, file_name)
             } else {
                 dest.join(file_name)
@@ -3074,6 +3279,16 @@ impl qobject::SeabunnyEngine {
                 continue;
             }
             if target == src {
+                continue;
+            }
+            if res == "merge" {
+                let overlaps = real_directory(&src) && fs::canonicalize(&src).ok().zip(fs::canonicalize(&dest).ok())
+                    .is_some_and(|(source, destination)| destination.starts_with(source));
+                if overlaps { merge_errors.push("Cannot paste a folder into itself or its subfolders.".into()); continue; }
+                match transfer_merge_entry(&src, &target, is_cut, &mut merged_actions) {
+                    Ok(()) => { if is_cut { completed_cuts.push(src_str.clone()); } }
+                    Err(error) => merge_errors.push(error),
+                }
                 continue;
             }
             // Overwriting an existing entry cannot be reversed, so skip undo for it.
@@ -3095,6 +3310,7 @@ impl qobject::SeabunnyEngine {
             }
             let target_str = target.to_string_lossy().to_string();
             if is_cut {
+                completed_cuts.push(src_str.clone());
                 if undoable {
                     move_pairs.push((src_str.clone(), target_str));
                 }
@@ -3104,22 +3320,28 @@ impl qobject::SeabunnyEngine {
         }
 
         if is_cut {
-            if let Ok(mut clip) = CLIPBOARD.lock() {
-                clip.0.clear();
-                clip.1 = false;
-            }
-            self.as_mut().set_clipboard_cut_paths_json(QString::from("[]"));
-            self.as_mut().set_has_clipboard(false);
+            let remaining = if let Ok(mut clip) = CLIPBOARD.lock() {
+                clip.0.retain(|path| !completed_cuts.contains(path));
+                clip.1 = !clip.0.is_empty();
+                clip.0.clone()
+            } else { files.clone() };
+            self.as_mut().set_clipboard_cut_paths_json(QString::from(&serde_json::to_string(&remaining).unwrap_or_else(|_| "[]".into())));
+            self.as_mut().set_has_clipboard(!remaining.is_empty());
         }
 
-        if !move_pairs.is_empty() {
+        if !merged_actions.is_empty() {
+            if !move_pairs.is_empty() { merged_actions.push(UndoAction::Move { pairs: move_pairs }); }
+            if !copy_pairs.is_empty() { merged_actions.push(UndoAction::Copy { pairs: copy_pairs }); }
+            self.as_mut().record_undo(UndoAction::Merge { actions: merged_actions });
+        } else if !move_pairs.is_empty() {
             self.as_mut().record_undo(UndoAction::Move { pairs: move_pairs });
         } else if !copy_pairs.is_empty() {
             self.as_mut().record_undo(UndoAction::Copy { pairs: copy_pairs });
         }
 
         self.as_mut().file_operation_finished();
-        self.refresh();
+        self.as_mut().refresh();
+        self.set_navigation_error(QString::from(&merge_errors.join("\n")));
     }
 
     pub fn drop_items_resolved(mut self: Pin<&mut Self>, paths_json: &QString, dest_dir: &QString, as_copy: bool, resolution: &QString) {
@@ -3129,10 +3351,12 @@ impl qobject::SeabunnyEngine {
         let dest = PathBuf::from(dest_dir.to_string());
         if !dest.is_dir() { return; }
         let Ok(canonical_dest) = fs::canonicalize(&dest) else { return; };
-        let res = resolution.to_string();
+        let (res, merge_choices) = merge_resolution(&resolution.to_string());
 
         let mut move_pairs: Vec<(String, String)> = Vec::new();
         let mut copy_pairs: Vec<(String, String)> = Vec::new();
+        let mut merged_actions = Vec::new();
+        let mut merge_errors = Vec::new();
 
         if let Ok(paths) = serde_json::from_str::<Vec<String>>(&paths_json.to_string()) {
             for src_str in paths {
@@ -3151,13 +3375,28 @@ impl qobject::SeabunnyEngine {
                 }
 
                 let Some(file_name) = src.file_name().and_then(|n| n.to_str()) else { continue };
-                let target = if res == "rename" {
+                let original_target = dest.join(file_name);
+                if res == "merge" && real_directory(&src) && real_directory(&original_target) {
+                    if let Err(error) = merge_folders(&src, &original_target, !as_copy, &merge_choices, &mut merged_actions) { merge_errors.push(error); }
+                    continue;
+                }
+                let target = if res == "merge" && entry_exists(&original_target) {
+                    match resolve_merge_collision(&src, &original_target, &merge_choices, &mut merged_actions) {
+                        Ok(Some(target)) => target,
+                        Ok(None) => continue,
+                        Err(error) => { merge_errors.push(error); continue; }
+                    }
+                } else if res == "rename" {
                     get_unique_name(&dest, file_name)
                 } else {
                     dest.join(file_name)
                 };
 
                 if res == "skip" && dest.join(file_name).exists() {
+                    continue;
+                }
+                if res == "merge" {
+                    if let Err(error) = transfer_merge_entry(&src, &target, !as_copy, &mut merged_actions) { merge_errors.push(error); }
                     continue;
                 }
                 let undoable = res == "rename" || !target.exists();
@@ -3187,14 +3426,19 @@ impl qobject::SeabunnyEngine {
             }
         }
 
-        if !move_pairs.is_empty() {
+        if !merged_actions.is_empty() {
+            if !move_pairs.is_empty() { merged_actions.push(UndoAction::Move { pairs: move_pairs }); }
+            if !copy_pairs.is_empty() { merged_actions.push(UndoAction::Copy { pairs: copy_pairs }); }
+            self.as_mut().record_undo(UndoAction::Merge { actions: merged_actions });
+        } else if !move_pairs.is_empty() {
             self.as_mut().record_undo(UndoAction::Move { pairs: move_pairs });
         } else if !copy_pairs.is_empty() {
             self.as_mut().record_undo(UndoAction::Copy { pairs: copy_pairs });
         }
 
         self.as_mut().file_operation_finished();
-        self.refresh();
+        self.as_mut().refresh();
+        self.set_navigation_error(QString::from(&merge_errors.join("\n")));
     }
 
     pub fn create_symlinks(mut self: Pin<&mut Self>, paths_json: &QString, dest_dir: &QString) {

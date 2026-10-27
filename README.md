@@ -29,6 +29,7 @@ yes, the spacing is deliberate. i have been incredibly annoying about it.
 - per-folder sorting. only folders with custom sorting need a saved entry
 - hidden files shown by default. ctrl+h if you'd rather pretend `.config` doesn't exist
 - trash, restore, copy/paste, drag and drop, and undo/redo for when you do some stupid shit
+- merge matching folders, then choose what to keep for clashing files. there's an apply-to-all switch too
 - read-only archive browsing and extraction
 - file permissions in properties, including a make executable switch. no terminal detour
 - open with lets you pick an app and save it as the default for that file type

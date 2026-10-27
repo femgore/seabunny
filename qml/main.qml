@@ -5449,16 +5449,24 @@ ApplicationWindow {
     // ==========================================
     SeabunnyDialog {
         id: conflictModal
-        title: "File Conflict"
-        dialogWidth: 420
+        title: resolvingMerge ? "File Already Exists" : "File Conflict"
+        dialogWidth: canMerge || resolvingMerge ? Math.min(560, window.width - 32) : 420
 
         property var conflicts: []
         property var droppedPaths: []
         property string destDir: ""
         property bool isDrop: false
         property bool asCopy: false
+        readonly property bool canMerge: conflicts.some(function(item) { return !!item.can_merge; })
+        property bool resolvingMerge: false
+        property var mergeConflicts: []
+        property int mergeIndex: 0
+        property var mergeChoices: ({})
+        property string mergeError: ""
 
         function showForClipboard(confList, dest) {
+            resolvingMerge = false;
+            mergeError = "";
             conflicts = confList;
             destDir = dest;
             isDrop = false;
@@ -5466,6 +5474,8 @@ ApplicationWindow {
         }
 
         function showForDrop(confList, paths, dest, copy) {
+            resolvingMerge = false;
+            mergeError = "";
             conflicts = confList;
             droppedPaths = paths;
             destDir = dest;
@@ -5475,6 +5485,21 @@ ApplicationWindow {
         }
 
         function applyResolution(res) {
+            if (res === "merge") {
+                var scan = JSON.parse(isDrop ? engine.check_merge_conflicts(JSON.stringify(droppedPaths), destDir)
+                                            : engine.check_clipboard_merge_conflicts(destDir));
+                if (scan.error) { mergeError = scan.error; return; }
+                mergeConflicts = scan.conflicts || [];
+                mergeChoices = ({});
+                mergeIndex = 0;
+                applyToAllConflicts.checked = false;
+                if (mergeConflicts.length) {
+                    resolvingMerge = true;
+                    conflicts = [mergeConflicts[0]];
+                    return;
+                }
+                res = JSON.stringify({mode: "merge", collisions: {}});
+            }
             if (isDrop) {
                 engine.drop_items_resolved(JSON.stringify(droppedPaths), destDir, asCopy, res);
             } else {
@@ -5483,9 +5508,19 @@ ApplicationWindow {
             close();
         }
 
+        function chooseMergeFile(choice) {
+            var end = applyToAllConflicts.checked ? mergeConflicts.length : mergeIndex + 1;
+            for (var index = mergeIndex; index < end; index++) mergeChoices[mergeConflicts[index].src_path] = choice;
+            mergeIndex = end;
+            if (mergeIndex < mergeConflicts.length) conflicts = [mergeConflicts[mergeIndex]];
+            else applyResolution(JSON.stringify({mode: "merge", collisions: mergeChoices}));
+        }
+
         Text {
             Layout.fillWidth: true
-            text: conflictModal.conflicts.length === 1
+            text: conflictModal.resolvingMerge
+                ? ("Conflict " + (conflictModal.mergeIndex + 1) + " of " + conflictModal.mergeConflicts.length + ". Choose which copy to keep.")
+                : conflictModal.conflicts.length === 1
                 ? ("\u201c" + conflictModal.conflicts[0].name + "\u201d already exists.")
                 : (conflictModal.conflicts.length + " items already exist in this destination.")
             color: theme.textMuted
@@ -5524,12 +5559,39 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
                     Text {
-                        text: conflictModal.conflicts[0] ? ("Destination size: " + conflictModal.conflicts[0].dest_size) : ""
+                        text: conflictModal.conflicts[0] ? (conflictModal.resolvingMerge
+                            ? "Incoming: " + conflictModal.conflicts[0].src_size + " · Existing: " + conflictModal.conflicts[0].dest_size
+                            : "Destination size: " + conflictModal.conflicts[0].dest_size) : ""
                         color: theme.outline
                         font.pixelSize: 11
                     }
                 }
             }
+        }
+
+        Text {
+            visible: conflictModal.canMerge
+            text: "Merge combines matching folders. You can choose what to keep for any files with the same name."
+            color: theme.textMuted
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+
+        SeabunnySwitch {
+            id: applyToAllConflicts
+            objectName: "applyToAllConflictsSwitch"
+            visible: conflictModal.resolvingMerge
+            label: "Apply to all remaining conflicts"
+        }
+
+        Text {
+            visible: text.length > 0
+            text: conflictModal.mergeError
+            color: theme.danger
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         RowLayout {
@@ -5544,18 +5606,35 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             SeabunnyButton {
                 text: "Skip"
+                visible: !conflictModal.resolvingMerge
                 variant: "tonal"
                 onClicked: conflictModal.applyResolution("skip")
             }
             SeabunnyButton {
+                objectName: "keepBothMergeButton"
                 text: "Keep Both"
                 variant: "tonal"
-                onClicked: conflictModal.applyResolution("rename")
+                onClicked: conflictModal.resolvingMerge ? conflictModal.chooseMergeFile("keep_both") : conflictModal.applyResolution("rename")
             }
             SeabunnyButton {
-                text: "Replace"
+                objectName: "keepExistingMergeButton"
+                text: "Keep Existing"
+                visible: conflictModal.resolvingMerge
+                variant: "tonal"
+                onClicked: conflictModal.chooseMergeFile("keep_existing")
+            }
+            SeabunnyButton {
+                objectName: "replaceExistingMergeButton"
+                text: conflictModal.resolvingMerge ? "Replace Existing" : "Replace"
                 variant: "filled"
-                onClicked: conflictModal.applyResolution("overwrite")
+                onClicked: conflictModal.resolvingMerge ? conflictModal.chooseMergeFile("replace") : conflictModal.applyResolution("overwrite")
+            }
+            SeabunnyButton {
+                objectName: "mergeFoldersButton"
+                visible: conflictModal.canMerge
+                text: "Merge"
+                variant: "filled"
+                onClicked: conflictModal.applyResolution("merge")
             }
         }
     }

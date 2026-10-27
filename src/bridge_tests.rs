@@ -1,5 +1,117 @@
 use super::*;
 
+fn merge_fixture(fixture: &Fixture) -> (PathBuf, PathBuf) {
+    let source = fixture.0.join("incoming/Folder ö");
+    let target = fixture.0.join("destination/Folder ö");
+    fs::create_dir_all(source.join("nested")).unwrap();
+    fs::create_dir_all(target.join("nested")).unwrap();
+    fs::write(source.join("new.txt"), "new").unwrap();
+    fs::write(source.join("nested/same.txt"), "incoming").unwrap();
+    fs::write(target.join("nested/same.txt"), "existing").unwrap();
+    fs::write(target.join("untouched.txt"), "untouched").unwrap();
+    (source, target)
+}
+
+#[test]
+fn folder_merge_copy_combines_nested_folders_and_undo_preserves_existing() {
+    let fixture = Fixture::new();
+    let (source, target) = merge_fixture(&fixture);
+    let choices = HashMap::from([(source.join("nested/same.txt").to_string_lossy().into_owned(), "keep_both".into())]);
+    let mut actions = Vec::new();
+    merge_folders(&source, &target, false, &choices, &mut actions).unwrap();
+    assert_eq!(fs::read_to_string(target.join("nested/same.txt")).unwrap(), "existing");
+    assert_eq!(fs::read_to_string(target.join("nested/same (1).txt")).unwrap(), "incoming");
+    assert!(target.join("new.txt").exists());
+    assert!(source.join("new.txt").exists());
+    assert!(!target.join("Folder ö").exists());
+    let redo = apply_inverse(&UndoAction::Merge { actions }).unwrap();
+    assert!(target.join("untouched.txt").exists());
+    assert!(target.join("nested/same.txt").exists());
+    assert!(!target.join("nested/same (1).txt").exists());
+    assert!(!target.join("new.txt").exists());
+    apply_action(&redo).unwrap();
+    assert!(target.join("nested/same (1).txt").exists());
+}
+
+#[test]
+fn folder_merge_cut_undo_redo_restores_source_tree() {
+    let fixture = Fixture::new();
+    let (source, target) = merge_fixture(&fixture);
+    fs::create_dir(source.join("empty")).unwrap();
+    let choices = HashMap::from([(source.join("nested/same.txt").to_string_lossy().into_owned(), "keep_both".into())]);
+    let mut actions = Vec::new();
+    merge_folders(&source, &target, true, &choices, &mut actions).unwrap();
+    assert!(!source.exists());
+    assert!(target.join("empty").is_dir());
+    let redo = apply_inverse(&UndoAction::Merge { actions }).unwrap();
+    assert!(source.join("empty").is_dir());
+    assert!(source.join("nested/same.txt").exists());
+    assert!(target.join("nested/same.txt").exists());
+    assert!(target.join("untouched.txt").exists());
+    assert!(!target.join("empty").exists());
+    apply_action(&redo).unwrap();
+    assert!(!source.exists());
+    assert!(target.join("nested/same (1).txt").exists());
+}
+
+#[test]
+fn folder_merge_keep_existing_leaves_skipped_cut_files_at_source() {
+    let fixture = Fixture::new();
+    let (source, target) = merge_fixture(&fixture);
+    let choices = HashMap::from([(source.join("nested/same.txt").to_string_lossy().into_owned(), "keep_existing".into())]);
+    let mut actions = Vec::new();
+    merge_folders(&source, &target, true, &choices, &mut actions).unwrap();
+    assert_eq!(fs::read_to_string(source.join("nested/same.txt")).unwrap(), "incoming");
+    assert_eq!(fs::read_to_string(target.join("nested/same.txt")).unwrap(), "existing");
+    assert!(!source.join("new.txt").exists());
+    assert!(target.join("new.txt").exists());
+}
+
+#[test]
+fn folder_merge_preflight_and_symlinks_do_not_touch_external_targets() {
+    use std::os::unix::fs::symlink;
+    let fixture = Fixture::new();
+    let (source, target) = merge_fixture(&fixture);
+    let outside = fixture.0.join("outside"); fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("sentinel"), "preserve").unwrap();
+    fs::create_dir(source.join("linked")).unwrap();
+    fs::write(source.join("linked/new.txt"), "incoming").unwrap();
+    symlink(&outside, target.join("linked")).unwrap();
+    symlink(&outside, source.join("only-link")).unwrap();
+    symlink("missing", source.join("broken")).unwrap();
+    symlink("other-missing", target.join("broken")).unwrap();
+    let mut conflicts = Vec::new();
+    collect_merge_conflicts(&source, &target, source.parent().unwrap(), &mut conflicts).unwrap();
+    assert_eq!(conflicts.len(), 3);
+    let choices = conflicts.into_iter().map(|conflict| (conflict.src_path, "keep_both".into())).collect();
+    let mut actions = Vec::new();
+    merge_folders(&source, &target, false, &choices, &mut actions).unwrap();
+    assert!(target.join("linked (1)/new.txt").exists());
+    assert_eq!(fs::read_link(target.join("linked")).unwrap(), outside);
+    assert_eq!(fs::read_link(target.join("broken (1)")).unwrap(), PathBuf::from("missing"));
+    assert!(!outside.join("new.txt").exists());
+    assert_eq!(fs::read_to_string(outside.join("sentinel")).unwrap(), "preserve");
+    let redo = apply_inverse(&UndoAction::Merge { actions }).unwrap();
+    assert!(!entry_exists(&target.join("broken (1)")));
+    apply_action(&redo).unwrap();
+    assert_eq!(fs::read_link(target.join("broken (1)")).unwrap(), PathBuf::from("missing"));
+    assert_eq!(fs::read_link(target.join("only-link")).unwrap(), outside);
+    assert_eq!(fs::read_to_string(outside.join("sentinel")).unwrap(), "preserve");
+}
+
+#[test]
+fn folder_merge_rejects_overlapping_paths_and_unresolved_collisions() {
+    let fixture = Fixture::new();
+    let (source, target) = merge_fixture(&fixture);
+    let mut actions = Vec::new();
+    assert!(merge_folders(&source, &source, false, &HashMap::new(), &mut actions).is_err());
+    assert!(merge_folders(&source, &source.join("nested"), false, &HashMap::new(), &mut actions).is_err());
+    assert!(actions.is_empty());
+    assert!(merge_folders(&source, &target, false, &HashMap::new(), &mut actions).is_err());
+    assert_eq!(fs::read_to_string(target.join("nested/same.txt")).unwrap(), "existing");
+    assert_eq!(fs::read_to_string(source.join("nested/same.txt")).unwrap(), "incoming");
+}
+
 #[test]
 fn archive_and_application_icons_agree_across_icon_sources() {
     for name in ["a.rar", "a.RAR", "a.7z", "a.tar.gz", "a.tgz", "a.cab", "a.iso", "a.zip"] {
