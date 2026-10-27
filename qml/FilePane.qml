@@ -361,6 +361,17 @@ Item {
     }
     function zoomFiles(direction) { if (isList()) theme.stepZoom(direction); else zoomGrid(direction); }
 
+    // Keep zoom input on the pane so delegates and the Flickable cannot swallow it.
+    WheelHandler {
+        target: null
+        acceptedModifiers: Qt.ControlModifier
+        onWheel: function(event) {
+            var delta = event.angleDelta.y || event.pixelDelta.y;
+            if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
+            event.accepted = true;
+        }
+    }
+
     ParallelAnimation {
         id: enterAnim
         NumberAnimation { target: stage; property: "opacity"; from: 0.25; to: 1.0; duration: 170; easing.type: Easing.OutCubic }
@@ -835,15 +846,6 @@ Item {
                         gridView.contentY = Math.max(0, Math.min(maxY, gridView.contentY - (event.angleDelta.y > 0 ? step : -step)));
                     }
                 }
-                WheelHandler {
-                    target: null
-                    acceptedModifiers: Qt.ControlModifier
-                    onWheel: function(event) {
-                        var delta = event.angleDelta.y || event.pixelDelta.y;
-                        if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
-                        event.accepted = true;
-                    }
-                }
 
                 // Rubber band selection.
                 Rectangle {
@@ -1082,7 +1084,7 @@ Item {
                                     anchors.fill: parent
                                     source: theme.showThumbnails && card.thumbable && card.thumb_id.length > 0
                                         ? ("image://thumb/" + card.thumb_id) : ""
-                                    fillMode: Image.PreserveAspectCrop
+                                    fillMode: Image.PreserveAspectFit
                                     sourceSize.width: pane.thumbnailEdge
                                     sourceSize.height: pane.thumbnailEdge
                                     asynchronous: true
@@ -1340,15 +1342,6 @@ Item {
                     }
                 }
 
-                WheelHandler {
-                    target: null
-                    acceptedModifiers: Qt.ControlModifier
-                    onWheel: function(event) {
-                        var delta = event.angleDelta.y || event.pixelDelta.y;
-                        if (delta) pane.zoomFiles(delta > 0 ? 1 : -1);
-                        event.accepted = true;
-                    }
-                }
                 footer: Item {
                     width: listView.width
                     height: 80
@@ -1450,7 +1443,7 @@ Item {
                                         id: listThumb
                                         anchors.fill: parent
                                         source: theme.showThumbnails && row.thumbable && row.thumb_id.length > 0 ? ("image://thumb/" + row.thumb_id) : ""
-                                        fillMode: Image.PreserveAspectCrop
+                                        fillMode: Image.PreserveAspectFit
                                         sourceSize.width: 24; sourceSize.height: 24
                                         asynchronous: true
                                     }
