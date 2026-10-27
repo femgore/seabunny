@@ -1,19 +1,16 @@
 # the legal bits
 
-the boring legal shit. still matters.
+the boring legal shit i unfortunately have to care about!
 
-i maintain seabunny as femgore. it also includes earlier application code by
-m-uvex, and the existing contributor notices are still in the source.
+i maintain seabunny as femgore. the existing contributor notices are still in the source.
 
 ## the application license
 
-the Loaf v0.2.1 release includes an MIT license, now copied here as `LICENSE`.
-femgore confirms the m-uvex account is theirs, and this covers the imported app
-code and its contributors under the upstream project terms. the fonts and other
-third-party assets still keep their own notices below. one license file doesn't
-magically absorb every file in the repo.
+the seabunny 0.2.0 release includes an MIT license,
+the fonts and other third-party assets still keep their own notices below. one license file doesn't
+magically absorb every file in the repo unfortnately
 
-## the fonts brought their paperwork
+## the fonts and stuff
 
 the fonts have their own notices:
 
