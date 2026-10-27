@@ -31,7 +31,8 @@ const HELP: &str = "Seabunny - a Material 3 file manager
 Usage: seabunny [OPTIONS] [PATH...]
 
 Opens each PATH (a folder, a file to show in its folder, or a file:// URI)
-in a tab. Without --new-window the paths are handed to a running Seabunny.
+in a tab. A plain launch opens a tab when Seabunny is active, and a separate
+window when it is not. Paths are handed to a running Seabunny.
 
 Options:
   -p, --path <DIR>   Start in DIR

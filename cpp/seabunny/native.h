@@ -1,9 +1,10 @@
-// Native helpers exposed to QML as the `native` context property and to
+// Native helpers exposed to QML as the `nativeBridge` context property and to
 // Rust through cxx (see src/native.rs).
 #pragma once
 
 #include <QDBusAbstractAdaptor>
 #include <QObject>
+#include <QSet>
 #include <QStringList>
 #include <QVariantMap>
 
@@ -42,6 +43,10 @@ public:
     // Files passed on the command line / requested over D-Bus but not yet
     // opened by the UI (drained by QML on start-up).
     Q_INVOKABLE QStringList takePendingOpen();
+    Q_INVOKABLE bool isApplicationActive() const;
+    Q_INVOKABLE bool openInActiveWindow(const QString &path) const;
+    void setRemoteWindowActive(const QString &clientId, bool active);
+    void removeRemoteWindow(const QString &clientId);
 
     void queueOpen(const QStringList &paths, const QString &mode);
     QString startupMode() const { return m_mode; }
@@ -57,6 +62,8 @@ private:
     QVariantMap readClipboard() const;
 
     QStringList m_pending;
+    QSet<QString> m_activeWindowClients;
+    QString m_activeWindowClient;
     QString m_mode = QStringLiteral("tab");
     QVariantMap m_clipboard;
 };
@@ -89,6 +96,7 @@ public:
 
 public Q_SLOTS:
     void Open(const QStringList &paths, const QString &mode);
+    void SetWindowActive(const QString &clientId, bool active);
 
 private:
     SeabunnyNative *m_native;

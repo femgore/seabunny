@@ -67,9 +67,10 @@ Item {
                 if (engine.loading || core.busy) return;
                 switch (phase) {
                 case 0:
-                    check(Qt.application.version === "0.2.0", "application reports Seabunny 0.2.0");
+                    check(Qt.application.version === "0.2.1", "application reports Seabunny 0.2.1");
+                    check(w.homeLaunchTarget(true) === "tab" && w.homeLaunchTarget(false) === "window", "plain launches route to a tab only when Seabunny is active");
                     check(engine.show_hidden && row(".hidden") >= 0, "hidden files are shown by default");
-                    check(JSON.parse(core.places_json).some(function(p) { return p.name === "Legacy favorite"; }), "existing Seabunny favorites are present alongside upstream places");
+                    check(JSON.parse(core.places_json).some(function(p) { return p.name === "Legacy favorite"; }), "existing Seabunny favorites are present alongside desktop places");
                     select("a.txt"); key(Qt.Key_C, Qt.ControlModifier); w.newTab(base + "/work/destination"); break;
                 case 1:
                     w.testKeys.forceActiveFocus(); key(Qt.Key_V, Qt.ControlModifier); break;
@@ -92,7 +93,7 @@ Item {
                     engine.set_sort("name", true); engine.change_folder_position("mixed");
                     key(Qt.Key_F3); break;
                 case 8:
-                    check(w.splitView, "upstream split view remains available");
+                    check(w.splitView, "split view remains available");
                     key(Qt.Key_F3); w.testSidebar.expanded = true; w.testSidebar.expandedWidth = 342;
                     select("program.AppImage"); w.showProperties([base + "/work/program.AppImage"]); break;
                 case 9:

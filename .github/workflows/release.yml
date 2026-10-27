@@ -1,0 +1,128 @@
+name: Build release assets
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build and package tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-wayland-dev \
+            libkf6windowsystem-dev libglib2.0-dev libarchive-dev python3 ruby ruby-dev rpm
+          sudo gem install --no-document fpm
+      - name: Build Seabunny
+        run: cargo build --release --locked
+      - name: Build tarball, deb, and rpm
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          test "$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "seabunny"))')" = "$VERSION"
+          mkdir -p dist
+          cp target/release/seabunny "dist/seabunny-${VERSION}-linux-x86_64"
+          PACKAGE_JSON="$(python3 -B packaging/seabunny/package_user.py build --with-portal)"
+          PACKAGE_DIR="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["package"])' <<< "$PACKAGE_JSON")"
+          tar -C "$PACKAGE_DIR/.." -czf "dist/seabunny-v${VERSION}-linux-x86_64.tar.gz" "$(basename "$PACKAGE_DIR")"
+          python3 -B packaging/release/build_packages.py deb --output dist
+          python3 -B packaging/release/build_packages.py rpm --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/*
+
+  arch-package:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Arch package
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed git rust cargo cmake ninja pkgconf qt6-base qt6-declarative qt6-svg qt6-wayland kwindowsystem glib2 python libarchive 7zip zip
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c "cd '$GITHUB_WORKSPACE/packaging/aur' && makepkg --syncdeps --noconfirm --cleanbuild"
+          mkdir -p dist
+          cp packaging/aur/*.pkg.tar.zst dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.zst
+
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+            qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-wayland-dev \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-effects \
+            qml6-module-qtquick-shapes \
+            libkf6windowsystem-dev libglib2.0-dev libarchive-dev python3 patchelf
+      - name: Build and bundle AppImage
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          test "$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "seabunny"))')" = "$VERSION"
+          cargo build --release --locked
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage -O linuxdeploy.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage -O linuxdeploy-plugin-qt.AppImage
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
+          cp target/release/seabunny AppDir/usr/bin/
+          cp packaging/seabunny/org.femgore.Seabunny.desktop AppDir/usr/share/applications/
+          cp packaging/seabunny/org.femgore.Seabunny.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+          cp packaging/seabunny/org.femgore.Seabunny.svg AppDir/org.femgore.Seabunny.svg
+          QML_SOURCES_PATHS="$GITHUB_WORKSPACE/qml" \
+            EXTRA_PLATFORM_PLUGINS="libqwayland-egl.so;libqwayland-generic.so" \
+            LINUXDEPLOY_OUTPUT_VERSION="$VERSION" \
+            LDAI_OUTPUT="Seabunny-${VERSION}-x86_64.AppImage" \
+            APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage
+          mkdir -p dist
+          mv "Seabunny-${VERSION}-x86_64.AppImage" dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  publish:
+    needs: [linux-packages, arch-package, appimage]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Add standalone binary and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          test -n "$(find dist -maxdepth 1 -type f -name 'seabunny-*-linux-x86_64' -print -quit)"
+          (cd dist && sha256sum * > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          body_path: CHANGELOG.md
+          files: dist/*

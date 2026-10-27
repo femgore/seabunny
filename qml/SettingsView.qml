@@ -1491,7 +1491,7 @@ Item {
                                                 variant: "outline"
                                                 visible: modelData.url.length > 0
                                                 onClicked: {
-                                                    native.setClipboardText(modelData.url);
+                                                    nativeBridge.setClipboardText(modelData.url);
                                                     if (typeof window !== "undefined" && window.toast)
                                                         window.toast("info", qsTr("Link copied to clipboard"));
                                                 }

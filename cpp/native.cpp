@@ -7,6 +7,7 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusInterface>
+#include <QDBusMessage>
 #include <QDBusReply>
 #include <QFileInfo>
 #include <QGuiApplication>
@@ -16,6 +17,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTranslator>
+#include <QTimer>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QUrl>
@@ -194,6 +196,44 @@ bool SeabunnyNative::isAdmin() const
     return !qEnvironmentVariable("SEABUNNY_ADMIN").isEmpty();
 }
 
+bool SeabunnyNative::isApplicationActive() const
+{
+    return QGuiApplication::applicationState() == Qt::ApplicationActive || !m_activeWindowClients.isEmpty();
+}
+
+void SeabunnyNative::setRemoteWindowActive(const QString &clientId, bool active)
+{
+    if (!clientId.startsWith(QLatin1Char(':')))
+        return;
+    if (active) {
+        m_activeWindowClients.insert(clientId);
+        m_activeWindowClient = clientId;
+    } else {
+        m_activeWindowClients.remove(clientId);
+        if (m_activeWindowClient == clientId)
+            m_activeWindowClient = m_activeWindowClients.isEmpty() ? QString() : *m_activeWindowClients.constBegin();
+    }
+}
+
+void SeabunnyNative::removeRemoteWindow(const QString &clientId)
+{
+    m_activeWindowClients.remove(clientId);
+    if (m_activeWindowClient == clientId)
+        m_activeWindowClient = m_activeWindowClients.isEmpty() ? QString() : *m_activeWindowClients.constBegin();
+}
+
+bool SeabunnyNative::openInActiveWindow(const QString &path) const
+{
+    if (QGuiApplication::applicationState() == Qt::ApplicationActive || m_activeWindowClient.isEmpty())
+        return false;
+    QDBusMessage message = QDBusMessage::createMethodCall(m_activeWindowClient,
+        QStringLiteral("/org/femgore/Seabunny"), QStringLiteral("org.femgore.Seabunny"),
+        QStringLiteral("Open"));
+    message << QStringList{path} << QStringLiteral("tab");
+    const auto reply = QDBusConnection::sessionBus().call(message, QDBus::Block, 1500);
+    return reply.type() == QDBusMessage::ReplyMessage;
+}
+
 FileManager1Adaptor::FileManager1Adaptor(QObject *host, SeabunnyNative *native)
     : QDBusAbstractAdaptor(host), m_native(native) {}
 
@@ -218,6 +258,11 @@ SeabunnyAppAdaptor::SeabunnyAppAdaptor(QObject *host, SeabunnyNative *native)
 void SeabunnyAppAdaptor::Open(const QStringList &paths, const QString &mode)
 {
     Q_EMIT m_native->openRequested(toLocalPaths(paths), mode.isEmpty() ? QStringLiteral("tab") : mode);
+}
+
+void SeabunnyAppAdaptor::SetWindowActive(const QString &clientId, bool active)
+{
+    m_native->setRemoteWindowActive(clientId, active);
 }
 
 bool forward_to_running_instance(const rust::Vec<rust::String> &paths, rust::Str mode)
@@ -265,13 +310,41 @@ void setup_engine(QQmlApplicationEngine &engine, const rust::Vec<rust::String> &
         // FileManager1 stays with whichever file manager claimed it first.
         if (bus.registerService(QStringLiteral("org.freedesktop.FileManager1")))
             bus.registerObject(QStringLiteral("/org/freedesktop/FileManager1"), fmObj, QDBusConnection::ExportAdaptors);
+        if (bus.interface()) {
+            QObject::connect(bus.interface(), &QDBusConnectionInterface::serviceOwnerChanged, native,
+                [native](const QString &service, const QString &oldOwner, const QString &newOwner) {
+                    if (!oldOwner.isEmpty() && newOwner.isEmpty())
+                        native->removeRemoteWindow(service);
+                });
+        }
+    } else if (bus.isConnected() && !native->isAdmin() && newWindow) {
+        // A secondary window exports the same interface on its unique bus name
+        // so the primary instance can direct a new-tab request to the focused
+        // window rather than opening a tab in a different window.
+        auto *appObj = new QObject(native);
+        new SeabunnyAppAdaptor(appObj, native);
+        bus.registerObject(QString::fromLatin1(kPath), appObj, QDBusConnection::ExportAdaptors);
+        const QString clientId = bus.baseService();
+        auto reportActivity = [bus, clientId](Qt::ApplicationState state) {
+            if (!bus.interface() || !bus.interface()->isServiceRegistered(QString::fromLatin1(kService)))
+                return;
+            QDBusMessage message = QDBusMessage::createMethodCall(QString::fromLatin1(kService),
+                QString::fromLatin1(kPath), QStringLiteral("org.femgore.Seabunny"),
+                QStringLiteral("SetWindowActive"));
+            message << clientId << (state == Qt::ApplicationActive);
+            bus.asyncCall(message);
+        };
+        QObject::connect(qApp, &QGuiApplication::applicationStateChanged, native, reportActivity);
+        QTimer::singleShot(0, native, [reportActivity] {
+            reportActivity(QGuiApplication::applicationState());
+        });
     }
 
     auto *translator = new QTranslator(&engine);
     if (translator->load(QLocale(), QStringLiteral("seabunny"), QStringLiteral("_"), QStringLiteral(":/i18n")))
         QCoreApplication::installTranslator(translator);
 
-    engine.rootContext()->setContextProperty(QStringLiteral("native"), native);
+    engine.rootContext()->setContextProperty(QStringLiteral("nativeBridge"), native);
     engine.addImageProvider(QStringLiteral("thumb"), new ThumbnailProvider);
     install_icon_provider(engine);
 }

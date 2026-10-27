@@ -1,9 +1,9 @@
 # Maintainer: femgore
 #
-# The source expects the v0.2.0 tag.
+# The source expects the matching release tag.
 
 pkgname=seabunny
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Qt/QML file manager with an optional XDG Desktop Portal file chooser'
 arch=('x86_64')

@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -11,7 +12,9 @@ parser.add_argument("--package", required=True)
 args = parser.parse_args()
 package = Path(args.package).resolve(strict=True)
 manifest = json.loads((package / "manifest.json").read_text())
-assert manifest["version"] == "0.2.0"
+repository = Path(__file__).resolve().parents[2]
+version = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (repository / "Cargo.toml").read_text()).group(1)
+assert manifest["version"] == version
 with tempfile.TemporaryDirectory(prefix="seabunny-next-package-") as tmp:
     home = Path(tmp) / "home"
     home.mkdir(mode=0o700)
@@ -25,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="seabunny-next-package-") as tmp:
         return completed.stdout
     run("python3", "-B", package / "package_user.py", "install", "--package", package, "--no-register")
     binary = home / ".local/opt/seabunny/current/bin/seabunny"
-    assert run(binary, "--version").strip() == "seabunny 0.2.0"
+    assert run(binary, "--version").strip() == "seabunny " + version
     desktop = home / ".local/share/applications/org.femgore.Seabunny.desktop"
     assert desktop.exists() and "org.femgore.Seabunny" in desktop.read_text()
     portal = package / "portal_user.py"

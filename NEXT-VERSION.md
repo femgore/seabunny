@@ -1,156 +1,88 @@
-# seabunny 0.2.0
+# seabunny 0.2.1 release notes
 
-new guts. same rabbit. considerably more fucking plumbing.
+new file plumbing, familiar rabbit. this is the version to try if you want the
+file manager and its portal picker to behave like one app instead of distant
+cousins who only meet at holidays.
 
-this development branch starts from [upstream Loaf](https://github.com/m-uvex/loaf-fm)
-commit `7cbde575414723f330e866ceeacf31862f7835e0` (26 october 2026).
-it keeps upstream's typed file model, asynchronous directory scans, file watcher,
-background jobs, split panes, batch rename, recursive search and quick look.
-we aren't making a second file browser just for the picker. both windows use the
-same pane, sidebar and theme components.
+## what's in the release
 
-## appearance parity fixes
+the explorer and file picker use the same directory pane, navigation, sidebar,
+icons, thumbnails, and theme. the picker runs as its own portal backend, so
+closing a dialog doesn't close an explorer window. the calling app still handles
+reading or writing the selected files.
 
-automatic colors now discover the desktop palette even when the development
-launcher isolates the app's state directory. explicit palette paths and manually
-chosen color schemes still win. nested light/dark wallpaper exports are preserved.
+the chooser supports Open File, Save File, Save Multiple, and Select Folder.
+filters, suggested filenames, current directories, multiple selection,
+overwrite confirmation, cancellation, choices, and parent-window information are
+handled by the portal request. picker state is kept separate from explorer state.
 
-the 0.1 grid is back: 220-pixel nominal cells by default, an 88–420 range, large
-previews, and column-by-column ctrl+scroll zoom. ctrl+plus / ctrl+minus and the view controls
-use the same sizing; ctrl+0 resets it. all four icon styles are visible without an
-experimental toggle. the settings About entry uses the rabbit too. finally.
+the explorer brings tabs, split view, search, Quick Look, batch rename, large
+thumbnails, aspect-ratio-aware previews, and Ctrl+scroll zoom. file operations
+run in background jobs with progress, cancellation, and undo where supported.
+folder merges ask what to do with clashing files and can apply one choice to the
+remaining conflicts.
 
-Open With is a direct right-click action for files and folders. sidebar dragging
-now updates its width directly, with the expand/collapse animation kept separate.
-software rendering uses a plain thumbnail instead of a GPU-only mask, even when
-low-power mode is manually disabled. loaded-but-invisible previews are not useful.
+Open With can remember an app by file type. executable files and AppImages launch
+as applications. Properties includes a Make executable switch. network bookmarks
+use the desktop URI handler, while local folders stay in Seabunny.
 
-## the stuff brought back
+Serpantinum palettes update live. System icons follow the desktop icon theme.
+Sorting preferences are stored only for folders that differ from the default;
+hidden files are shown by default. Explorer and picker each remember their own
+sidebar width and open or closed state.
 
-- Seabunny branding, icons, live Serpantinum colors and the compact save-name field
-- the independent portal process, OpenFile / SaveFile / SaveFiles, filters,
-  choices, overwrite confirmation, cancellation and parent-window integration
-- separate saved sidebar width and open/closed state for explorer and picker
-- sparse per-folder sorting, hidden files on by default, and existing favorites
-- Open With, saved file-type defaults, direct executable/AppImage opening,
-  and the Make executable switch in Properties
-- folder merging with individual collision decisions, apply-to-all, cancellation,
-  and grouped undo/redo, using the same background jobs as ordinary copies
-- validated libarchive browsing, extraction and copying archive members
+## trying the build before installing it
 
-existing `folderTabs`, favorites, sidebar layout and sort state have compatibility
-readers. normal 0.2 sessions use the newer pane-state format. the development
-launcher doesn't import your installed settings, so trying this branch doesn't
-silently migrate your everyday profile.
-
-## try it without replacing anything
-
-from this checkout:
+build and run a separate development window from this checkout:
 
 ```fish
 cargo build --release --locked
 fish ./run-development.fish
 ```
 
-preferences live under `target/development-profile`, independently of the installed
-app. it can browse and operate on your real files when you launch it, so the usual
-file-manager rules still apply. the launcher doesn't install anything, claim the
-normal running-instance service, or change default apps or portal configuration.
-close the development window to go back to using the installed version.
+the development profile stays under `target/development-profile`. it can still
+change real files if you ask it to, so point it at test data when you're checking
+destructive operations.
 
-to try the development picker without registering or enabling anything:
+to test portal dialogs without changing your active picker:
 
 ```fish
 fish ./test-file-picker.fish
 fish ./test-file-picker.fish --case save
 ```
 
-accept or cancel each sample dialog. the helper runs this checkout's backend on
-its own private bus with a disposable profile. close the terminal or press ctrl+c
-to stop it. sample files and the backend log stay under `target/portal-development-*`
-and `target/portal-live-test-*`. the chooser doesn't write the selected outputs.
+the helper uses a private bus and disposable profile. selected paths are returned
+to the test app; the chooser doesn't write the outputs.
 
+## building and release downloads
 
-building a package also doesn't install it:
+the release workflow checks that the pushed tag matches `Cargo.toml`, then builds
+the Arch package, Debian package, RPM, AppImage, standalone executable, and
+user-installable archive. it attaches SHA-256 checksums and publishes the release
+when all package jobs pass. the AppImage is the explorer build; use a native package or
+the archive with the optional backend when you want portal integration.
+
+the user archive is built locally with:
 
 ```fish
+cargo build --release --locked
 python3 -B packaging/seabunny/package_user.py build --with-portal
 ```
 
-installation and portal selection are separate steps. the installed explorer and
-registered portal now both use 0.2.0; the previous versioned payloads remain as a
-fallback. see the [installation guide](packaging/seabunny/README.md) and
-[portal guide](packaging/seabunny/PORTAL.md). having a fallback is less exciting
-than needing one.
+installing the application, registering the portal, and selecting it for
+FileChooser are separate actions. see [the install guide](packaging/seabunny/README.md)
+and [the portal guide](packaging/seabunny/PORTAL.md) before changing the active
+portal preference.
 
-## bugs fixed during the port
+## verification and limits
 
-upstream's copy cleanup could remove a destination created by another process
-when exclusive creation failed. cleanup now checks that we created that entry;
-moves use a no-replace rename. there are regression tests for files and folders.
+the disposable UI checks cover keyboard navigation, copying, merging, undo/redo,
+permissions, Open With, archives, chooser filters and modes, live palettes, and
+state across relaunches. Rust, archive, portal-bus, native Qt, and Wayland
+clipboard checks use test-owned profiles or private sessions.
 
-a thumbnail provider used a global shutdown flag. closing one picker could disable
-thumbnails in later pickers. shutdown now belongs to each provider, with a test
-that destroys one provider and loads images through another.
-
-folder merges keep an undo journal, including replaced destination files in trash.
-cut clipboard entries aren't cleared before the background operation finishes;
-skipped and failed sources remain available to paste again.
-
-## checking the damn thing
-
-`tests/next/run_rust.py` builds the Rust tests, then runs them with disposable
-HOME/XDG directories. `tests/next/run_checks.py` drives the shared explorer and
-chooser offscreen with synthetic files, keyboard events and a live palette fixture.
-it also restarts both modes to verify sorting and independent sidebar persistence.
-`tests/next/run_wayland.py` tests copy and cut between separate processes on a
-private virtual KWin compositor. nothing needs your live clipboard or preferences.
-
-build native tests in a canonical directory, not through a symlink:
-
-```fish
-cmake -S tests -B /tmp/seabunny-qt-tests
-cmake --build /tmp/seabunny-qt-tests -j 2
-python3 -B tests/next/run_native.py --build-dir /tmp/seabunny-qt-tests
-env SEABUNNY_PORTAL_TESTS=/tmp/seabunny-qt-tests/portal-tests python3 -B tests/test_portal_bus.py
-```
-
-the portal integration check uses a private bus and temporary service definitions.
-it checks activation, concurrent requests, cancellation, and routing through the
-real portal frontend. it doesn't enable Seabunny for your desktop.
-`--helium` additionally checks Save As with a disposable headless Helium profile;
-it doesn't use your browser profile. desktop-visible dialogs still deserve a
-manual test before switching the active backend.
-
-`python3 -B tests/next/test_package.py --package /absolute/package/path` installs a
-built package into a temporary home and checks portal enable/disable and removal
-without touching your desktop.
-
-## verification for this development snapshot
-
-- release explorer and portal builds succeed
-- 73 Rust tests, 24 archive-reader tests, and 5 portal-installer tests pass
-- native Open With, portal controller/wire replies, and thumbnail lifecycle checks pass
-- the shared UI passes keyboard copy/paste, merge decisions and undo/redo,
-  executable permissions, Open With, archive copying, chooser filters and modes,
-  live palette updates, and persistence across separate processes
-- private Wayland clipboard transfers pass for copy and cut between two processes
-- private-bus activation and the real portal frontend pass all three methods
-- headless Helium Save As reaches the backend with its suggested filename
-- package installation and portal rollback pass inside a disposable home
-
-these checks don't replace trying the visible windows on your actual desktop.
-the current installed explorer and registered portal service both use the 0.2.0
-payload; existing portal preferences were left as they were.
-
-## things that still need real-world testing
-
-SMB, network sharing, removable-drive disconnects and privileged operations haven't
-been validated on real devices or services during this port. they remain upstream
-features rather than promises from a synthetic test. permissions on individual
-files use Seabunny's checked file identity; recursive permission changes retain the
-upstream implementation. archive previews remain read-only, with the existing
-size limits. encrypted formats still depend on installed archive tools.
-
-the gallery currently shows 0.1. new screenshots can wait until the layout is done
-being poked. feedback is welcome; tell me what broke and how to make it happen.
+network shares, removable-drive disconnects, and privileged operations still
+need testing against real devices and services. archive previews are read-only;
+encrypted formats need the relevant system archive tools. the AppImage bundles
+Qt and QML resources, but archive helper programs may still need to be installed
+on the host.

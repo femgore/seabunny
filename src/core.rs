@@ -169,6 +169,8 @@ pub mod qobject {
         #[qinvokable]
         fn open_new_window(self: &SeabunnyCore, path: &QString);
         #[qinvokable]
+        fn open_uri(self: Pin<&mut SeabunnyCore>, uri: &QString);
+        #[qinvokable]
         fn quick_look(self: &SeabunnyCore, path: &QString) -> QString;
         #[qinvokable]
         fn get_item_info(self: &SeabunnyCore, path: &QString) -> QString;
@@ -507,6 +509,24 @@ fn save_places_config(c: &PlacesConfig) {
     state::set("placesConfig", &serde_json::to_string(c).unwrap_or_default());
 }
 
+fn network_place(bookmark: &xdg::Bookmark) -> Option<serde_json::Value> {
+    if bookmark.path().is_some() {
+        return None;
+    }
+    let (scheme, _) = bookmark.uri.split_once("://")?;
+    if scheme.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-')) {
+        return None;
+    }
+    Some(serde_json::json!({
+        "id": format!("network:{}", bookmark.uri),
+        "kind": "network",
+        "name": bookmark.display_name(),
+        "path": bookmark.uri,
+        "icon": "network",
+        "system_icon": "folder-remote-symbolic",
+    }))
+}
+
 /// Every sidebar entry, with a `hidden` flag.
 fn build_places(hostname: &str, device_type: &str) -> Vec<serde_json::Value> {
     let cfg = places_config();
@@ -541,6 +561,13 @@ fn build_places(hostname: &str, device_type: &str) -> Vec<serde_json::Value> {
             "system_icon": "folder-symbolic",
             "missing": !exists,
         }));
+    }
+    // Preserve remote GTK bookmarks too. Seabunny cannot browse arbitrary
+    // bookmark protocols itself, so clicking one delegates to the desktop handler.
+    for b in xdg::bookmarks() {
+        if let Some(entry) = network_place(&b) {
+            items.push(entry);
+        }
     }
     let favorites = crate::favorites::load(&util::config_home().join("seabunny/favorites.json")).unwrap_or_default();
     for favorite in favorites {
@@ -1435,6 +1462,23 @@ impl qobject::SeabunnyCore {
             cmd.arg(p);
         }
         let _ = util::spawn_detached(cmd);
+    }
+    pub fn open_uri(mut self: Pin<&mut Self>, uri: &QString) {
+        let value = uri.to_string();
+        let Some((scheme, _)) = value.split_once("://") else { return };
+        if scheme.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-')) {
+            return;
+        }
+        let launched = util::which("xdg-open")
+            .map(|opener| {
+                let mut command = std::process::Command::new(opener);
+                command.arg(&value);
+                util::spawn_detached(command).is_ok()
+            })
+            .unwrap_or(false);
+        if !launched {
+            self.as_mut().notify(q("error"), q(&format!("No application can open “{}”", value)));
+        }
     }
     pub fn quick_look(&self, path: &QString) -> QString {
         q(&serde_json::to_string(&info::quick_look(Path::new(&path.to_string()))).unwrap_or_else(|_| "{}".into()))
@@ -2534,6 +2578,21 @@ impl cxx_qt::Initialize for qobject::SeabunnyCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_bookmarks_are_sidebar_places() {
+        let remote = xdg::Bookmark { uri: "sftp://nas/media".into(), label: "Media".into() };
+        let place = network_place(&remote).unwrap();
+        assert_eq!(place["kind"], "network");
+        assert_eq!(place["name"], "Media");
+        assert_eq!(place["path"], "sftp://nas/media");
+        let bare = xdg::Bookmark { uri: "smb://nas/share".into(), label: String::new() };
+        assert_eq!(network_place(&bare).unwrap()["name"], "smb://nas/share");
+        let local = xdg::Bookmark { uri: "file:///home/user".into(), label: String::new() };
+        assert!(network_place(&local).is_none());
+        let invalid = xdg::Bookmark { uri: "not a uri".into(), label: String::new() };
+        assert!(network_place(&invalid).is_none());
+    }
 
     #[test]
     fn extraction_never_nests_or_overwrites() {

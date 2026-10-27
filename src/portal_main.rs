@@ -27,6 +27,7 @@ pub mod xdg;
 use cxx_qt_lib::QGuiApplication;
 fn main() {
     let mut app = QGuiApplication::new();
+    native::ffi::set_application_identity(env!("CARGO_PKG_VERSION"));
     integration::ffi::configure_seabunny();
     if !integration::ffi::start_seabunny_portal() { std::process::exit(1); }
     if let Some(app) = app.as_mut() { app.exec(); }

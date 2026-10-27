@@ -15,9 +15,18 @@ def checksum(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def project_version(repository):
+    cargo_toml = (repository / "Cargo.toml").read_text()
+    match = re.search(r'(?m)^version\s*=\s*"([0-9A-Za-z.+-]+)"\s*$', cargo_toml)
+    if not match:
+        raise ValueError("Could not read the project version from Cargo.toml")
+    return match.group(1)
+
+
 def build(with_portal=False):
     repository = Path(__file__).resolve().parents[2]
     source = repository / "packaging/seabunny"
+    version = project_version(repository)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     output = repository / "target/seabunny-dist" / stamp
     output.mkdir(parents=True, exist_ok=False)
@@ -44,10 +53,10 @@ def build(with_portal=False):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(original, destination)
         destination.chmod(0o755 if relative in ("bin/seabunny", "bin/xdg-desktop-portal-seabunny", "seabunny.fish", "install-user.fish") else 0o644)
-    manifest = {"application": "Seabunny", "version": "0.2.0", "release": stamp,
+    manifest = {"application": "Seabunny", "version": version, "release": stamp,
                 "files": {relative: checksum(output / relative) for relative in files}}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    archive_path = output.parent / ("seabunny-0.2.0-linux-x86_64-" + stamp + ".tar.gz")
+    archive_path = output.parent / ("seabunny-" + version + "-linux-x86_64-" + stamp + ".tar.gz")
     with tarfile.open(archive_path, "x:gz") as archive:
         archive.add(output, arcname="seabunny-" + stamp)
     (archive_path.parent / (archive_path.name + ".sha256")).write_text(checksum(archive_path) + "  " + archive_path.name + "\n")

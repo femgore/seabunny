@@ -14,7 +14,7 @@ pub mod ffi {
         /// Hands `paths` to an already running Seabunny. True when it accepted.
         fn forward_to_running_instance(paths: &Vec<String>, mode: &str) -> bool;
 
-        /// Registers D-Bus services, the `native` QML context property, the
+        /// Registers D-Bus services, the `nativeBridge` QML context property, the
         /// thumbnail image provider and translations.
         fn setup_engine(engine: Pin<&mut QQmlApplicationEngine>, paths: &Vec<String>, mode: &str);
 

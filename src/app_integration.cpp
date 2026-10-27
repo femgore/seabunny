@@ -41,7 +41,6 @@ bool seabunny_ignorable_focus_warning(QtMsgType type, const QMessageLogContext &
 
 void configure_seabunny() {
     QCoreApplication::setApplicationName("Seabunny");
-    QCoreApplication::setApplicationVersion("0.2.0");
     QCoreApplication::setOrganizationDomain("github.com/femgore");
     QGuiApplication::setApplicationDisplayName("Seabunny");
     QGuiApplication::setDesktopFileName("org.femgore.Seabunny");

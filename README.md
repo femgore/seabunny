@@ -2,10 +2,9 @@
 
 a file manager. for managing files. groundbreaking stuff.
 
-this branch is **seabunny 0.2.0**, rebuilt on the newer upstream architecture.
-the installed explorer and portal now use the matching 0.2.0 build. the previous
-versioned payloads are still around, because sometimes the old thing working is
-useful information. [what changed and how to try it](NEXT-VERSION.md), or the
+this is **seabunny 0.2.1**. it brings the file manager, matching portal picker,
+and the full 0.2 feature set together in one release. [what changed and how to
+try it](NEXT-VERSION.md), or the
 [changelog](CHANGELOG.md) if you just want the list.
 
 i wanted my folders to look nice and stuff so that became a rust + qt/qml project.
@@ -74,9 +73,10 @@ try the development file picker separately with `fish ./test-file-picker.fish`.
 that opens five test dialogs on a private bus. no installing, no changing your
 current picker, no desktop renovation bullshit. `--case save` runs just Save As.
 
-there isn't a tagged release or published AUR package yet, so you'll need to
-build from source. the AUR packaging draft is included; it needs the v0.2.0 tag
-to exist before its source can be fetched. the Nix recipe is here too, but it
+release tags build downloads for Arch, Debian, RPM, AppImage, a standalone
+executable, and a user-installable archive. the workflow publishes the release
+after every package job succeeds. if it's not on the [GitHub releases page](https://github.com/femgore/seabunny/releases)
+yet, the build is still doing its thing. the Nix recipe is here too, but it
 hasn't been verified for this snapshot.
 its presence in the repo is not a spiritual guarantee that it works.
 if you try it and it falls on its ass, the details would actually be useful.
@@ -139,8 +139,8 @@ would be annoying as hell. KWin and QtTest are test dependencies, not app requir
 the older 0.1 UI harnesses are kept for reference; use `tests/next` for this branch.
 [more test details and remaining limits](NEXT-VERSION.md).
 
-it's still early. archive editing isn't supported. upstream's optional SMB and
-sharing features are present, but haven't been tested against a real server here.
+it's still early. archive editing isn't supported. optional SMB and sharing
+features are present, but haven't been tested against a real server here.
 sharing needs an existing cloudflared installation; the app won't download one.
 
 bugs, suggestions, weird screenshots: all welcome. open an issue and tell me
