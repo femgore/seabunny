@@ -68,8 +68,8 @@ jobs:
             cat /tmp/seabunny-makepkg.log
           else
             result=$?
-            diagnostics="$(grep -Ei 'error|failed|not found|no such file|fatal|cannot' /tmp/seabunny-makepkg.log | tail -n 8 || true)"
-            if [ -z "$diagnostics" ]; then diagnostics="$(tail -n 8 /tmp/seabunny-makepkg.log)"; fi
+            diagnostics="$(grep -Ei 'error|failed|not found|no such file|fatal|cannot|undefined reference|undefined symbol|DSO missing|error adding symbols|ld\.bfd' /tmp/seabunny-makepkg.log | tail -n 16 || true)"
+            if [ -z "$diagnostics" ]; then diagnostics="$(tail -n 16 /tmp/seabunny-makepkg.log)"; fi
             printf '%s\n' "$diagnostics" | while IFS= read -r line; do
               echo "::error title=makepkg diagnostic::$line"
             done
