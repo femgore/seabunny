@@ -3,6 +3,20 @@
 the big bits first. the everyday fixes are in there too, because apparently
 those count as features once enough people ask.
 
+## 0.2.2
+
+the big update stays the big update. this is the small follow-up that fixes a
+couple of annoying gaps and finally puts the downloads where they belong.
+
+- This PC scans for storage when Seabunny starts, so Internal Storage shows up
+  without waiting for a drive or mount change
+- hover stays attached to the card under the pointer as the grid changes, while
+  connected selection outlines stay in sync
+- the README gallery now has matching light and dark screenshots for three palettes
+- releases publish only a Debian package, RPM, user-installable tarball with the
+  portal picker, and AppImage. no Arch package, standalone binary, or extra
+  checksum download in this set
+
 ## 0.2.1
 
 this release brings the complete 0.2 feature set together: the shared file
@@ -33,13 +47,8 @@ the quality fixes that make copying files less of a trust exercise.
   own local file navigation
 - copy, move, archive extraction, and cut clipboard handling use safer
   background operations, with failed or skipped sources left available
-- release automation prepares Debian, RPM, AppImage, standalone, and
-  user-installable downloads with SHA-256 checksums
-
 the portal remains opt-in. installing the backend doesn't change which portal
 handles FileChooser, or touch screen sharing and the rest of the desktop setup.
-release downloads appear once the Debian/RPM and AppImage builds plus checksum
-step succeed. The Arch package is built separately and doesn't block them.
 
 ## earlier 0.2 work included here
 

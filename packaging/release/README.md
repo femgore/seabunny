@@ -1,22 +1,23 @@
 # Release builds
 
 release builds are made from a version tag. the workflow checks that the tag
-matches `Cargo.toml`, builds the app and picker, and publishes the release once
-the Debian/RPM package and AppImage jobs succeed. The Arch package is attempted
-separately and does not hold up the downloadable release.
+matches `Cargo.toml`, builds the app and picker, and publishes after all four
+asset jobs succeed. releases contain exactly these downloads:
 
-the draft includes:
-
-- Debian and RPM packages (`.deb` and `.rpm`)
-- a standalone `seabunny` executable
-- a user-installable `.tar.gz` package with the optional picker
+- a Debian package (`.deb`)
+- an RPM package (`.rpm`)
 - an AppImage
-- `SHA256SUMS` for checking downloads
+- a user-installable `.tar.gz` package with the optional picker
+
+the release workflow does not attach a standalone binary, checksum file, or
+Arch package. Arch packaging files remain available in the repository, but that
+job is not run for these releases. the release job does not change portal
+preferences or activate the picker.
 
 to prepare a release, update the version in `Cargo.toml`, `Cargo.lock`,
-`flake.nix`, and `packaging/aur/PKGBUILD` together. check the changes, push a tag
-in the form `v0.2.1`. the release job does not change package settings or
-activate the picker.
+`flake.nix`, `packaging/aur/PKGBUILD`, and `packaging/aur/.SRCINFO` together.
+update the matching version checks and release notes, validate the packages,
+then push a tag matching the version, such as `v0.2.2`.
 
 the source build needs Rust, CMake, Ninja, Qt 6, KDE Window System, GLib, and
 development headers for the libraries listed in the project build setup. Native

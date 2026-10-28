@@ -67,7 +67,7 @@ Item {
                 if (engine.loading || core.busy) return;
                 switch (phase) {
                 case 0:
-                    check(Qt.application.version === "0.2.1", "application reports Seabunny 0.2.1");
+                    check(Qt.application.version === "0.2.2", "application reports Seabunny 0.2.2");
                     check(w.homeLaunchTarget(true) === "tab" && w.homeLaunchTarget(false) === "window", "plain launches route to a tab only when Seabunny is active");
                     check(engine.show_hidden && row(".hidden") >= 0, "hidden files are shown by default");
                     check(JSON.parse(core.places_json).some(function(p) { return p.name === "Legacy favorite"; }), "existing Seabunny favorites are present alongside desktop places");

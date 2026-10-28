@@ -1,6 +1,6 @@
 pkgbase = seabunny
 	pkgdesc = Qt/QML file manager with an optional XDG Desktop Portal file chooser
-	pkgver = 0.2.1
+	pkgver = 0.2.2
 	pkgrel = 1
 	url = https://github.com/femgore/seabunny
 	arch = x86_64
@@ -21,7 +21,7 @@ pkgbase = seabunny
 	depends = 7zip
 	depends = zip
 	optdepends = ffmpeg: video thumbnails
-	source = git+https://github.com/femgore/seabunny.git#tag=v0.2.1
+	source = git+https://github.com/femgore/seabunny.git#tag=v0.2.2
 	sha256sums = SKIP
 
 pkgname = seabunny

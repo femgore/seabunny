@@ -1,8 +1,15 @@
-# seabunny 0.2.1 release notes
+# seabunny 0.2.2 release notes
 
 new file plumbing, familiar rabbit. this is the version to try if you want the
 file manager and its portal picker to behave like one app instead of distant
 cousins who only meet at holidays.
+
+## what changed in 0.2.2
+
+the main 0.2 update is still the main event. this follow-up makes the storage
+dashboard scan on startup, keeps hover feedback on the card under the pointer,
+refreshes the light/dark screenshot gallery, and publishes four practical Linux
+downloads: `.deb`, `.rpm`, a user-installable `.tar.gz`, and an AppImage.
 
 ## what's in the release
 
@@ -40,7 +47,7 @@ cargo build --release --locked
 fish ./run-development.fish
 ```
 
-the development profile stays under `target/development-profile`. it can still
+the development profile stays under `build-local/development-profile`. it can still
 change real files if you ask it to, so point it at test data when you're checking
 destructive operations.
 
@@ -57,10 +64,10 @@ to the test app; the chooser doesn't write the outputs.
 ## building and release downloads
 
 the release workflow checks that the pushed tag matches `Cargo.toml`, then builds
-the Arch package, Debian package, RPM, AppImage, standalone executable, and
-user-installable archive. it attaches SHA-256 checksums and publishes the release
-when all package jobs pass. the AppImage is the explorer build; use a native package or
-the archive with the optional backend when you want portal integration.
+and publishes exactly four assets: a Debian package, an RPM, an AppImage, and a
+user-installable `.tar.gz` archive with the optional portal backend. the workflow
+does not attach an Arch package, standalone executable, or checksum file. the
+AppImage is the explorer build; use the archive when you want portal integration.
 
 the user archive is built locally with:
 

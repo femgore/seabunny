@@ -2,7 +2,7 @@
 
 a file manager. for managing files. groundbreaking stuff.
 
-this is **seabunny 0.2.1**. it brings the file manager, matching portal picker,
+this is **seabunny 0.2.2**. it brings the file manager, matching portal picker,
 and the full 0.2 feature set together in one release. [what changed and how to
 try it](NEXT-VERSION.md), or the
 [changelog](CHANGELOG.md) if you just want the list.
@@ -74,10 +74,10 @@ try the development file picker separately with `fish ./test-file-picker.fish`.
 that opens five test dialogs on a private bus. no installing, no changing your
 current picker, no desktop renovation bullshit. `--case save` runs just Save As.
 
-release tags build Debian, RPM, AppImage, a standalone executable, and a
-user-installable archive. the release goes live when the Debian/RPM and AppImage
-builds pass; the Arch package is a separate extra and won't hold it up. if it's
-not on the [GitHub releases page](https://github.com/femgore/seabunny/releases)
+release tags publish four downloads: a Debian package, an RPM, a user-installable
+tarball with the picker, and an AppImage. the release goes live when all four
+builds pass. we're skipping the Arch package and standalone binary for these
+releases. if it's not on the [GitHub releases page](https://github.com/femgore/seabunny/releases)
 yet, the build is still doing its thing. the Nix recipe is here too, but it
 hasn't been verified for this snapshot.
 its presence in the repo is not a spiritual guarantee that it works.

@@ -31,59 +31,15 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           test "$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "seabunny"))')" = "$VERSION"
           mkdir -p dist
-          cp target/release/seabunny "dist/seabunny-${VERSION}-linux-x86_64"
           PACKAGE_JSON="$(python3 -B packaging/seabunny/package_user.py build --with-portal)"
-          PACKAGE_DIR="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["package"])' <<< "$PACKAGE_JSON")"
-          tar -C "$PACKAGE_DIR/.." -czf "dist/seabunny-v${VERSION}-linux-x86_64.tar.gz" "$(basename "$PACKAGE_DIR")"
+          PACKAGE_ARCHIVE="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["archive"])' <<< "$PACKAGE_JSON")"
+          cp "$PACKAGE_ARCHIVE" "dist/seabunny-${VERSION}-linux-x86_64.tar.gz"
           python3 -B packaging/release/build_packages.py deb --output dist
           python3 -B packaging/release/build_packages.py rpm --output dist
       - uses: actions/upload-artifact@v4
         with:
           name: linux-packages
           path: dist/*
-
-  arch-package:
-    runs-on: ubuntu-24.04
-    container: archlinux:base-devel
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Arch build dependencies
-        run: |
-          set -euo pipefail
-          pacman -Syu --noconfirm --needed git rust cargo cmake ninja pkgconf qt6-base qt6-declarative qt6-svg qt6-wayland kwindowsystem glib2 python libarchive 7zip zip
-      - name: Set Arch package version
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
-      - name: Prepare package builder
-        run: |
-          set -euo pipefail
-          useradd -m builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
-      - name: Build Arch package
-        run: |
-          set -euo pipefail
-          if su builder -c "cd '$GITHUB_WORKSPACE/packaging/aur' && makepkg --syncdeps --noconfirm --cleanbuild" > /tmp/seabunny-makepkg.log 2>&1; then
-            cat /tmp/seabunny-makepkg.log
-          else
-            result=$?
-            diagnostics="$(grep -Ei 'error|failed|not found|no such file|fatal|cannot|undefined reference|undefined symbol|DSO missing|error adding symbols|ld\.bfd' /tmp/seabunny-makepkg.log | tail -n 16 || true)"
-            if [ -z "$diagnostics" ]; then diagnostics="$(tail -n 16 /tmp/seabunny-makepkg.log)"; fi
-            printf '%s\n' "$diagnostics" | while IFS= read -r line; do
-              echo "::error title=makepkg diagnostic::$line"
-            done
-            exit "$result"
-          fi
-      - name: Collect Arch package
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          cp packaging/aur/*.pkg.tar.zst dist/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: arch-package
-          path: dist/*.pkg.tar.zst
 
   appimage:
     runs-on: ubuntu-26.04
@@ -144,6 +100,7 @@ jobs:
     needs: [linux-packages, appimage]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: linux-packages
@@ -154,14 +111,14 @@ jobs:
           name: appimage
           path: dist
           merge-multiple: true
-      - name: Add standalone binary and checksums
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Verify the four release assets
         run: |
           set -euo pipefail
-          mkdir -p dist
-          test -n "$(find dist -maxdepth 1 -type f -name 'seabunny-*-linux-x86_64' -print -quit)"
-          (cd dist && sha256sum * > SHA256SUMS)
+          test -n "$(find dist -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -type f -name '*.rpm' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
       - uses: softprops/action-gh-release@v2
         with:
           draft: false
