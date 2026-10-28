@@ -1,10 +1,10 @@
 #!/usr/bin/env fish
 # Keep development preferences separate from the installed application.
 set --local seabunny_root (path resolve (path dirname (status filename)))
-set --local seabunny_binary "$seabunny_root/target/release/seabunny"
-set --local seabunny_profile "$seabunny_root/target/development-profile"
+set --local seabunny_binary "$seabunny_root/build-local/release/seabunny"
+set --local seabunny_profile "$seabunny_root/build-local/development-profile"
 if not test -x "$seabunny_binary"
-    echo 'Build this checkout first: cargo build --release --locked' >&2
+    echo 'Build this checkout first: env CARGO_TARGET_DIR=build-local cargo build --release --locked --offline (from this directory)' >&2
     exit 1
 end
 for directory in config data cache state

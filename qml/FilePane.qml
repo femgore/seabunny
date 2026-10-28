@@ -406,9 +406,12 @@ Item {
 
     Timer {
         id: gridGeometryTimer
-        interval: 280
+        interval: 80
         repeat: false
-        onTriggered: pane.gridGeometryChanging = false
+        onTriggered: {
+            pane.gridGeometryChanging = false;
+            selectionCanvas.requestPaint();
+        }
     }
 
     ParallelAnimation {
@@ -530,11 +533,13 @@ Item {
                     function onCellWidthChanged() {
                         pane.gridGeometryChanging = true;
                         gridGeometryTimer.restart();
+                        selectionCanvas.requestPaint();
                         repaintTimer.restart();
                     }
                     function onCellHeightChanged() {
                         pane.gridGeometryChanging = true;
                         gridGeometryTimer.restart();
+                        selectionCanvas.requestPaint();
                         repaintTimer.restart();
                     }
                 }
@@ -587,55 +592,153 @@ Item {
                         paintBlock(ctx, sel);
                 }
 
-                // Paint each selected item's own hit area. Separate shapes
-                // leave the inter-item gaps visibly empty.
+                // Trace one outline around connected selected items. This is
+                // visual padding around the grid cells; delegates keep their
+                // original pointer and selection hitboxes.
                 function paintBlock(ctx, sel) {
                     var visible = visibleIndices();
-                    var radius = ctxRadius();
-                    ctx.beginPath();
+                    var cols = pane.isList() ? 1 : pane.cols();
+                    var traced = {};
+                    for (var t = 0; t < visible.length; ++t)
+                        traced[visible[t]] = true;
+
+                    var segments = [];
                     for (var i = 0; i < visible.length; ++i) {
                         var idx = visible[i];
                         if (!sel[idx])
                             continue;
-                        var g = baseRect(idx);
-                        var r = Math.min(radius, (g.x1 - g.x0) / 2, (g.y1 - g.y0) / 2);
-                        ctx.moveTo(g.x0 + r, g.y0);
-                        ctx.arcTo(g.x1, g.y0, g.x1, g.y0 + r, r);
-                        ctx.arcTo(g.x1, g.y1, g.x1 - r, g.y1, r);
-                        ctx.arcTo(g.x0, g.y1, g.x0, g.y1 - r, r);
-                        ctx.arcTo(g.x0, g.y0, g.x0 + r, g.y0, r);
-                        ctx.closePath();
+                        var g = baseRect(idx, sel, cols, traced);
+                        if (!g.up) segments.push([g.x0, g.y0, g.x1, g.y0]);
+                        if (!g.right) segments.push([g.x1, g.y0, g.x1, g.y1]);
+                        if (!g.down) segments.push([g.x1, g.y1, g.x0, g.y1]);
+                        if (!g.left) segments.push([g.x0, g.y1, g.x0, g.y0]);
                     }
+                    if (segments.length === 0)
+                        return;
+
+                    var loops = traceLoops(segments);
+                    ctx.beginPath();
+                    for (var l = 0; l < loops.length; ++l)
+                        addLoop(ctx, loops[l], ctxRadius());
                     ctx.fillStyle = cssColor(theme.secondaryContainer);
                     ctx.fill();
                     ctx.strokeStyle = cssColor(theme.primary);
                     ctx.lineWidth = 1.5;
+                    ctx.lineJoin = "round";
                     ctx.stroke();
                 }
 
-                // Bounds match the actual item areas; gaps stay unpainted.
-                function baseRect(idx) {
+                // Grid edges meet exactly so both concave shapes and diagonal
+                // corner contacts can be traced as a single connected path.
+                function baseRect(idx, sel, cols, traced) {
+                    var selectedNeighbour = function(n) {
+                        return n >= 0 && !!traced[n] && !!sel[n];
+                    };
                     if (pane.isList()) {
                         var rowH = Math.round(38 * Math.max(0.85, Math.min(1.3, pane.zoom)));
                         var ly = Math.round(listHeader.height + 6 + idx * (rowH + listView.spacing) - listView.contentY);
+                        var up = idx > 0 && selectedNeighbour(idx - 1);
+                        var down = selectedNeighbour(idx + 1);
+                        var halfGap = listView.spacing / 2;
                         return {
                             x0: 0, x1: listView.width,
-                            y0: ly, y1: ly + rowH
+                            y0: up ? ly - halfGap : ly,
+                            y1: down ? ly + rowH + halfGap : ly + rowH,
+                            up: up, right: false, down: down, left: false
                         };
                     }
                     var cw = gridView.cellWidth;
                     var ch = gridView.cellHeight;
-                    var cols = pane.cols();
                     var c = idx % cols;
                     var row = Math.floor(idx / cols);
-                    // The stroke's outer edge ends at the inset hit boundary.
-                    var inset = pane.gridCellGap / 2 + 0.75;
+                    var up = idx >= cols && selectedNeighbour(idx - cols);
+                    var down = selectedNeighbour(idx + cols);
+                    var left = c > 0 && selectedNeighbour(idx - 1);
+                    var right = c < cols - 1 && selectedNeighbour(idx + 1);
                     return {
-                        x0: c * cw + inset - gridView.contentX,
-                        x1: (c + 1) * cw - inset - gridView.contentX,
-                        y0: row * ch + inset - gridView.contentY,
-                        y1: (row + 1) * ch - inset - gridView.contentY
+                        x0: Math.round(c * cw - gridView.contentX),
+                        x1: Math.round((c + 1) * cw - gridView.contentX),
+                        y0: Math.round(row * ch - gridView.contentY),
+                        y1: Math.round((row + 1) * ch - gridView.contentY),
+                        up: up, right: right, down: down, left: left
                     };
+                }
+
+                // Join exposed cell edges into closed outlines for each
+                // connected selection group, including concave corners.
+                function traceLoops(segments) {
+                    var key = function(x, y) { return x + "," + y; };
+                    var outgoing = {};
+                    for (var i = 0; i < segments.length; ++i) {
+                        var s = segments[i];
+                        var k = key(s[0], s[1]);
+                        if (!outgoing[k]) outgoing[k] = [];
+                        outgoing[k].push({ x: s[2], y: s[3], used: false });
+                    }
+
+                    var loops = [];
+                    for (var a = 0; a < segments.length; ++a) {
+                        var first = segments[a];
+                        var bucket = outgoing[key(first[0], first[1])];
+                        var edge = null;
+                        for (var b = 0; b < bucket.length; ++b) {
+                            if (!bucket[b].used && bucket[b].x === first[2] && bucket[b].y === first[3]) {
+                                edge = bucket[b];
+                                break;
+                            }
+                        }
+                        if (!edge) continue;
+
+                        var points = [[first[0], first[1]]];
+                        var cx = first[0], cy = first[1];
+                        var ex = first[2], ey = first[3];
+                        var sx = cx, sy = cy;
+                        edge.used = true;
+                        var guard = 0;
+                        while (guard++ < 200000) {
+                            points.push([ex, ey]);
+                            if (ex === sx && ey === sy) break;
+                            var candidates = outgoing[key(ex, ey)];
+                            if (!candidates) break;
+                            var dx = ex - cx, dy = ey - cy;
+                            var best = null, bestTurn = -1;
+                            for (var j = 0; j < candidates.length; ++j) {
+                                var candidate = candidates[j];
+                                if (candidate.used) continue;
+                                var ox = candidate.x - ex, oy = candidate.y - ey;
+                                var turn = Math.atan2(dx * oy - dy * ox, dx * ox + dy * oy);
+                                if (turn <= 0) turn += Math.PI * 2;
+                                if (turn > bestTurn) { bestTurn = turn; best = candidate; }
+                            }
+                            if (!best) break;
+                            best.used = true;
+                            cx = ex; cy = ey;
+                            ex = best.x; ey = best.y;
+                        }
+                        if (points.length > 3 && ex === sx && ey === sy)
+                            loops.push(points);
+                    }
+                    return loops;
+                }
+
+                function addLoop(ctx, points, radius) {
+                    var count = points.length;
+                    if (count > 1 && points[count - 1][0] === points[0][0]
+                            && points[count - 1][1] === points[0][1])
+                        count -= 1;
+                    if (count < 3) return;
+                    ctx.moveTo((points[0][0] + points[1][0]) / 2,
+                               (points[0][1] + points[1][1]) / 2);
+                    for (var i = 1; i <= count; ++i) {
+                        var p = points[i % count];
+                        var prev = points[i - 1];
+                        var next = points[(i + 1) % count];
+                        var before = Math.hypot(p[0] - prev[0], p[1] - prev[1]);
+                        var after = Math.hypot(next[0] - p[0], next[1] - p[1]);
+                        ctx.arcTo(p[0], p[1], next[0], next[1],
+                                  Math.max(0, Math.min(radius, before / 2, after / 2)));
+                    }
+                    ctx.closePath();
                 }
 
                 // Rows that can touch the viewport, plus a row of slack.
@@ -906,6 +1009,7 @@ Item {
                     required property bool starred
 
                     readonly property bool isSelected: !!pane.selection[path]
+                    readonly property bool isHovered: cardMouse.containsMouse
                     readonly property bool isCut: !!window.cutSet[path]
                     readonly property int cols: pane.cols()
                     readonly property int col: index % Math.max(1, cols)
@@ -942,7 +1046,7 @@ Item {
                         color: card.isDropTarget ? theme.primaryContainer : theme.hoverOverlay
                         border.width: card.isDropTarget ? 2 : 0
                         border.color: theme.primary
-                        visible: !card.isSelected && (cardMouse.containsMouse || card.isDropTarget)
+                        visible: !card.isSelected && (card.isHovered || card.isDropTarget)
                     }
 
                     // Keyboard cursor ring, drawn above the connected selection.
@@ -957,8 +1061,11 @@ Item {
                     }
 
                     scale: !entered ? 0.82
-                        : (cardMouse.pressed ? 0.94 : ((cardMouse.containsMouse && !card.isSelected) ? 1.03 : 1.0))
-                    Behavior on scale { enabled: theme.animate; SpringAnimation { spring: 3.5; damping: 0.3 } }
+                        : (cardMouse.pressed ? 0.94 : ((card.isHovered && !card.isSelected) ? 1.03 : 1.0))
+                    Behavior on scale {
+                        enabled: theme.animate && !pane.gridGeometryChanging
+                        SpringAnimation { spring: 3.5; damping: 0.3 }
+                    }
 
                     ColumnLayout {
                         id: cardContentCol
