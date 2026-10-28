@@ -18,13 +18,14 @@ keep that in mind if you're bringing it somewhere else.
 
 ## look at her
 
-yeah theres 4 of them. i really wanted you to see that it changes colors.
-yes, the spacing is deliberate. i have been incredibly annoying about it.
+yeah, six now. each row is the same palette in light and dark, because apparently
+the colors deserve their own little photoshoot.
 
-| dark | light |
-| --- | --- |
-| ![Seabunny browsing files in dark mode](docs/gallery/image1.png) | ![Seabunny browsing files in light mode](docs/gallery/image2.png) |
-| ![Seabunny storage overview](docs/gallery/image3.png) | ![Seabunny with a warm desktop palette](docs/gallery/image4.png) |
+| palette | light | dark |
+| --- | --- | --- |
+| neutral | ![Seabunny in the neutral light palette](docs/gallery/neutral-light.webp) | ![Seabunny in the neutral dark palette](docs/gallery/neutral-dark.webp) |
+| cool | ![Seabunny in the cool light palette](docs/gallery/cool-light.webp) | ![Seabunny in the cool dark palette](docs/gallery/cool-dark.webp) |
+| warm | ![Seabunny in the warm light palette](docs/gallery/warm-light.webp) | ![Seabunny in the warm dark palette](docs/gallery/warm-dark.webp) |
 
 ## things i put in here
 
