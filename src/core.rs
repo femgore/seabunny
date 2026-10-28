@@ -2551,6 +2551,9 @@ impl cxx_qt::Initialize for qobject::SeabunnyCore {
         std::thread::spawn(|| {
             let _ = apps::all();
         });
+        // Populate This PC immediately; the watcher only reports later
+        // changes and must not be relied on for the first drive scan.
+        self.as_mut().load_drives();
         let t = self.qt_thread();
         let dw = watcher::DeviceWatcher::new(move || {
             let _ = t.queue(|core| core.load_drives());
