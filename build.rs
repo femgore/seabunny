@@ -86,7 +86,16 @@ fn main() {
     for lib in ["Qt6Quick", "Qt6Qml", "Qt6DBus", "Qt6Gui", "Qt6Core"] {
         println!("cargo:rustc-link-arg=-l{lib}");
     }
+    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let build_dir = out_dir.parent().unwrap().parent().unwrap();
+    let bridge_archive = std::fs::read_dir(build_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("cxx-qt-lib-"))
+        .map(|entry| entry.path().join("out/libcxx-qt-lib-cxxqt-generated.a"))
+        .find(|path| path.is_file())
+        .expect("cxx-qt-lib generated bridge archive was not found");
     println!("cargo:rustc-link-arg=-Wl,--whole-archive");
-    println!("cargo:rustc-link-arg=-lcxx-qt-lib-cxxqt-generated");
+    println!("cargo:rustc-link-arg={}", bridge_archive.display());
     println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
 }
