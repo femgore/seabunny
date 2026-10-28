@@ -86,4 +86,7 @@ fn main() {
     for lib in ["Qt6Quick", "Qt6Qml", "Qt6DBus", "Qt6Gui", "Qt6Core"] {
         println!("cargo:rustc-link-arg=-l{lib}");
     }
+    println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+    println!("cargo:rustc-link-arg=-lcxx-qt-lib-cxxqt-generated");
+    println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
 }
