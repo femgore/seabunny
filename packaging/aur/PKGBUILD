@@ -31,7 +31,8 @@ sha256sums=('SKIP')
 build() {
   cd "$srcdir/seabunny"
   CC=/usr/bin/gcc CXX=/usr/bin/g++ \
-    RUSTFLAGS='-C linker=/usr/bin/gcc' \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
+    RUSTFLAGS='-C linker=/usr/bin/gcc -C link-arg=-fuse-ld=bfd' \
     cargo build --release --locked
 }
 
