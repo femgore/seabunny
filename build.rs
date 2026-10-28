@@ -76,8 +76,13 @@ fn main() {
         })
     };
     builder.build();
-    // Our C++ code in the cxx-qt static library uses these modules; with
-    // --as-needed the early -l flags are dropped, so repeat them last.
+    // The generated C++ code uses these libraries; with --as-needed the early
+    // pkg-config flags are dropped, so repeat GLib and Qt libraries last.
+    for flag in String::from_utf8_lossy(&gio_libs.stdout).split_whitespace() {
+        if let Some(lib) = flag.strip_prefix("-l") {
+            println!("cargo:rustc-link-arg=-l{lib}");
+        }
+    }
     for lib in ["Qt6Quick", "Qt6Qml", "Qt6DBus", "Qt6Gui", "Qt6Core"] {
         println!("cargo:rustc-link-arg=-l{lib}");
     }
