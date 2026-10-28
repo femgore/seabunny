@@ -2,11 +2,11 @@
 
 release builds are made from a version tag. the workflow checks that the tag
 matches `Cargo.toml`, builds the app and picker, and publishes the release once
-all package jobs succeed.
+the Debian/RPM package and AppImage jobs succeed. The Arch package is attempted
+separately and does not hold up the downloadable release.
 
 the draft includes:
 
-- an Arch package (`.pkg.tar.zst`)
 - Debian and RPM packages (`.deb` and `.rpm`)
 - a standalone `seabunny` executable
 - a user-installable `.tar.gz` package with the optional picker

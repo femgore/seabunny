@@ -73,9 +73,10 @@ try the development file picker separately with `fish ./test-file-picker.fish`.
 that opens five test dialogs on a private bus. no installing, no changing your
 current picker, no desktop renovation bullshit. `--case save` runs just Save As.
 
-release tags build downloads for Arch, Debian, RPM, AppImage, a standalone
-executable, and a user-installable archive. the workflow publishes the release
-after every package job succeeds. if it's not on the [GitHub releases page](https://github.com/femgore/seabunny/releases)
+release tags build Debian, RPM, AppImage, a standalone executable, and a
+user-installable archive. the release goes live when the Debian/RPM and AppImage
+builds pass; the Arch package is a separate extra and won't hold it up. if it's
+not on the [GitHub releases page](https://github.com/femgore/seabunny/releases)
 yet, the build is still doing its thing. the Nix recipe is here too, but it
 hasn't been verified for this snapshot.
 its presence in the repo is not a spiritual guarantee that it works.

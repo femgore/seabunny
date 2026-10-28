@@ -33,12 +33,13 @@ the quality fixes that make copying files less of a trust exercise.
   own local file navigation
 - copy, move, archive extraction, and cut clipboard handling use safer
   background operations, with failed or skipped sources left available
-- release automation prepares Arch, Debian, RPM, AppImage, standalone, and
+- release automation prepares Debian, RPM, AppImage, standalone, and
   user-installable downloads with SHA-256 checksums
 
 the portal remains opt-in. installing the backend doesn't change which portal
 handles FileChooser, or touch screen sharing and the rest of the desktop setup.
-release downloads appear after the package builds and checksum step succeed.
+release downloads appear once the Debian/RPM and AppImage builds plus checksum
+step succeed. The Arch package is built separately and doesn't block them.
 
 ## earlier 0.2 work included here
 

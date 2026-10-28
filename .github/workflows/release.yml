@@ -141,11 +141,17 @@ jobs:
           path: dist/*.AppImage
 
   publish:
-    needs: [linux-packages, arch-package, appimage]
+    needs: [linux-packages, appimage]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: linux-packages
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
           path: dist
           merge-multiple: true
       - name: Add standalone binary and checksums
