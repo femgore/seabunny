@@ -18,14 +18,15 @@ keep that in mind if you're bringing it somewhere else.
 
 ## look at her
 
-yeah, six now. each row is the same palette in light and dark, because apparently
-the colors deserve their own little photoshoot.
+yeah isnt she beautiful? i know. i know. she is. very much beautiful. like a lady with big brown eyes and curly hair. W photoshoot honestly
 
 | palette | light | dark |
 | --- | --- | --- |
 | neutral | ![Seabunny in the neutral light palette](docs/gallery/neutral-light.webp) | ![Seabunny in the neutral dark palette](docs/gallery/neutral-dark.webp) |
 | cool | ![Seabunny in the cool light palette](docs/gallery/cool-light.webp) | ![Seabunny in the cool dark palette](docs/gallery/cool-dark.webp) |
 | warm | ![Seabunny in the warm light palette](docs/gallery/warm-light.webp) | ![Seabunny in the warm dark palette](docs/gallery/warm-dark.webp) |
+
+also just to make it clear: this applies to legit any color, not just these. like it themes automatically. it can be green yellow purple white whatever you want. i just like these colors.
 
 ## things i put in here
 
@@ -46,6 +47,8 @@ the colors deserve their own little photoshoot.
 - automatic live Serpantinum colors, built-in palettes, light/dark modes, and reduced motion
 - Phosphor, Serpantinum Symbols, system icons, and Adwaita, all in the normal settings
 - a matching file picker for apps using desktop portals. yes, i got distracted by that too
+
+yes bro i know these are all features that already exist in literally every file explorer ever I KNOW GET OFF MY CASE I DONT CARE
 
 f2 renames. delete sends things to trash. ctrl+shift+n makes a folder. f5 refreshes.
 the rest are in [HOTKEYS.md](HOTKEYS.md). there's a table. very official.
