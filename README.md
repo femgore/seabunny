@@ -27,6 +27,8 @@ the colors deserve their own little photoshoot.
 | cool | ![Seabunny in the cool light palette](docs/gallery/cool-light.webp) | ![Seabunny in the cool dark palette](docs/gallery/cool-dark.webp) |
 | warm | ![Seabunny in the warm light palette](docs/gallery/warm-light.webp) | ![Seabunny in the warm dark palette](docs/gallery/warm-dark.webp) |
 
+also just to make it clear: this applies to legit any color, not just these. like it themes automatically. it can be green yellow purple white whatever you want. i just like these colors.
+
 ## things i put in here
 
 - grid and list views, tabs, split view, recursive search, and the keyboard shortcuts your hands already know
