@@ -95,6 +95,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config \
             qt6-base-dev qt6-declarative-dev qt6-svg-dev qt6-wayland-dev \
+            qt6-wayland \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-effects \
             qml6-module-qtquick-shapes \
