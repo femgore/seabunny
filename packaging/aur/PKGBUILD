@@ -30,7 +30,8 @@ sha256sums=('SKIP')
 
 build() {
   cd "$srcdir/seabunny"
-  cargo build --release --locked
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
+    cargo build --release --locked
 }
 
 package() {
