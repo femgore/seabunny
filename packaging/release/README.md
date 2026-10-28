@@ -25,8 +25,11 @@ implementation, and `zip` for archive and file operations.
 
 the AppImage includes the Qt libraries and QML modules found by the bundler.
 Host-provided tools used for archive operations may still need to be installed
-separately. Test the draft on a clean system before calling it done; package
-metadata and Qt module names vary between distributions.
+separately. The Ubuntu 26.04 Qt packages currently omit the Wayland client
+platform plugin, so this AppImage uses XCB and needs XWayland in Wayland sessions.
+The native packages use the system Qt plugins and can run directly on Wayland.
+Test the draft on a clean system before calling it done; package metadata and Qt
+module names vary between distributions.
 
 `build_packages.py` stages the system package files and uses `fpm` to create a
 Debian or RPM package. It is intended for release automation and writes only to
