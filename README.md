@@ -18,8 +18,7 @@ keep that in mind if you're bringing it somewhere else.
 
 ## look at her
 
-yeah, six now. each row is the same palette in light and dark, because apparently
-the colors deserve their own little photoshoot.
+yeah isnt she beautiful? i know. i know. she is. very much beautiful. like a lady with big brown eyes and curly hair. W photoshoot honestly
 
 | palette | light | dark |
 | --- | --- | --- |
@@ -48,6 +47,8 @@ also just to make it clear: this applies to legit any color, not just these. lik
 - automatic live Serpantinum colors, built-in palettes, light/dark modes, and reduced motion
 - Phosphor, Serpantinum Symbols, system icons, and Adwaita, all in the normal settings
 - a matching file picker for apps using desktop portals. yes, i got distracted by that too
+
+yes bro i know these are all features that already exist in literally every file explorer ever I KNOW GET OFF MY CASE I DONT CARE
 
 f2 renames. delete sends things to trash. ctrl+shift+n makes a folder. f5 refreshes.
 the rest are in [HOTKEYS.md](HOTKEYS.md). there's a table. very official.
